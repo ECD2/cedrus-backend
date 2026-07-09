@@ -1,0 +1,19 @@
+{
+  "name": "cedrus-backend",
+  "version": "0.1.0",
+  "description": "Cedrus — SMS-first relationship-memory agent backend",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-cron": "^3.0.3",
+    "openai": "^4.56.0",
+    "twilio": "^5.2.0"
+  }
+}
