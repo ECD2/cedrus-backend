@@ -3,6 +3,7 @@ import { config } from './config.js';
 import { logger } from './utils/logger.js';
 import smsRouter from './routes/sms.js';
 import healthRouter from './routes/health.js';
+import adminRouter from './routes/admin.js';
 import { startScheduler } from './jobs/scheduler.js';
 
 const app = express();
@@ -12,6 +13,7 @@ app.use(express.json());
 
 app.use('/health', healthRouter);
 app.use('/sms', smsRouter);
+app.use('/admin', adminRouter);
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {

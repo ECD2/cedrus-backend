@@ -14,6 +14,12 @@ export async function create(userId, { name, relationship = null, aliases = [] }
   return data;
 }
 
+// Rename an existing person (e.g. the user corrected a misheard/misspelled name).
+export async function rename(personId, name) {
+  if (!personId || !name) return;
+  await supabase.from('people').update({ name }).eq('id', personId);
+}
+
 // Rename the user's own is_self person (set during onboarding — Fix C3).
 export async function renameSelf(userId, name) {
   await supabase.from('people').update({ name }).eq('user_id', userId).eq('is_self', true);

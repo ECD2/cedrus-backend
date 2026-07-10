@@ -23,7 +23,7 @@ export async function handleCompliance({ user, body }) {
   }
   if (HELP_WORDS.includes(word)) {
     await consent.log({ userId: user.id, eventType: 'help', rawText: body });
-    return { handled: true, reply: 'Cedrus helps you remember and show up for the people you care about. Text me about someone, or set a reminder. Reply STOP to opt out.' };
+    return { handled: true, reply: 'Cedrus helps you remember and show up for the people you care about. Text me about someone or save a reminder. To opt out, reply STOP. For support and more info, visit cedrus.life/support. Msg and data rates may apply.' };
   }
   return { handled: false };
 }

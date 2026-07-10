@@ -1,6 +1,7 @@
 import * as memory from '../services/memory.js';
 import * as rel from '../services/relationships.js';
 import * as users from '../services/users.js';
+import * as people from '../services/people.js';
 import { logger } from '../utils/logger.js';
 
 // ── Fix H1: the model PROPOSES, this file DISPOSES. Every enum-bound value is
@@ -26,6 +27,13 @@ export async function persist({ user, message, parsed, resolved }) {
   for (const p of parsed.people || []) {
     const personId = ref(p.mention_text);
     if (!personId) continue;
+    // Fix: a caught name correction ("no, it's Mela not Marla") renames the
+    // existing person instead of the model quietly promising a fix that
+    // never lands in the database.
+    if (p.corrected_name) {
+      try { await people.rename(personId, p.corrected_name); }
+      catch (err) { logger.warn('persist: rename failed', p.corrected_name, String(err)); }
+    }
     const signal = pick(p.contact_signal, SIGNALS, 'none');
     try {
       await rel.linkMessagePerson({

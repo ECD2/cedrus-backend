@@ -9,6 +9,14 @@ import { understand } from './05_understand.js';
 import { resolveEntities } from './06_resolveEntities.js';
 import { persist } from './07_persist.js';
 
+// ═══════════════ ONBOARDING COPY — EDIT FREELY, NO CODE BELOW CHANGES ═══════════════
+// MSG_COMPLIANCE is byte-identical to the Opt-In Confirmation Response approved in
+// Twilio toll-free verification. Do not edit this without re-submitting to Twilio.
+const MSG_COMPLIANCE =
+  "Hey, I'm Cedrus. I help you remember the people you care about: birthdays, life updates, gift ideas, and the moments worth following up on. By continuing, you agree to receive recurring SMS messages from Cedrus Life. No spam, ever. Reply STOP to opt out anytime, HELP for info. Msg & data rates may apply. Ready to start... who's someone important in your life?";
+const MSG_RATE_LIMIT = "You've reached today's limit - I'll be right here tomorrow.";
+// ════════════════════════════════════════════════════════════════════════════════════
+
 // Runs Stages B–E. Stage A (Twilio signature) is enforced in the route.
 export async function runInboundPipeline({ from, body, messageSid, numSegments }) {
   // STAGE B1 — identify (find or create user; DB trigger makes their self-person)
@@ -23,34 +31,49 @@ export async function runInboundPipeline({ from, body, messageSid, numSegments }
     return compliance.reply; // STOP → null reply; carrier sends its own confirmation
   }
 
-  // New user → welcome + ask their name (message 1 of onboarding)
+  // New user → the EXACT Twilio-approved opt-in text, verbatim, first and alone.
+  // It already ends by asking "who's someone important in your life?", so we
+  // don't ask a separate onboarding question on top of it.
   if (isNew) {
     await messages.logInbound({ userId: user.id, body, messageSid, numSegments });
-    const reply = "Hey - I'm Cedrus. I help you remember and show up for the people you care about. Reply STOP anytime to opt out. To start, what's your first name?";
-    await messages.logOutbound({ userId: user.id, body: reply, messageType: 'onboarding' });
-    return reply;
+    await messages.logOutbound({ userId: user.id, body: MSG_COMPLIANCE, messageType: 'onboarding' });
+    return MSG_COMPLIANCE;
   }
 
-  // Fix C3: their SECOND message is the name → capture it, complete onboarding,
-  // and from message three onward the AI pipeline handles everything.
-  if (!user.onboarding_complete) {
-    await messages.logInbound({ userId: user.id, body, messageSid, numSegments });
-    const name = extractFirstName(body);
-    await users.markOnboarded(user.id, name ? { name } : {});
-    if (name) await people.renameSelf(user.id, name);
-    const reply = `Great to meet you${name ? ', ' + name : ''}! Tell me about someone who matters to you - a birthday coming up, a gift idea, a life update. I'll remember it and bring it back when it counts.`;
-    await messages.logOutbound({ userId: user.id, body: reply, messageType: 'onboarding' });
-    return reply;
-  }
-
-  // STAGE B4 — log inbound (idempotent: a Twilio retry is a no-op)
+  // STAGE B4 — log inbound (idempotent: a Twilio retry is a no-op). Moved above
+  // the onboarding-completion check so both paths share one log call.
   const { message, duplicate } = await messages.logInbound({ userId: user.id, body, messageSid, numSegments });
   if (duplicate) { logger.info('Duplicate webhook ignored', messageSid); return null; }
+
+  // Their FIRST reply after the approved script answers "who's someone
+  // important in your life?" - that's real content, not smalltalk. Capture a
+  // name if they happen to give one, mark onboarding complete, then let it
+  // fall straight into the normal AI pipeline below so their answer actually
+  // gets saved instead of being thrown away on a generic "nice to meet you."
+  // The one exception: if all they sent was a bare name ("Emil"), there's
+  // nothing yet for the AI to extract - ask the follow-up instead of wasting
+  // a model call on an empty message.
+  if (!user.onboarding_complete) {
+    const name = extractFirstName(body);
+    const wordCount = body.trim().split(/\s+/).filter(Boolean).length;
+    const justAName = !!name && wordCount <= 2;
+
+    await users.markOnboarded(user.id, name ? { name } : {});
+    if (name) await people.renameSelf(user.id, name);
+
+    if (justAName) {
+      const reply = `Good to meet you, ${name}. So - tell me about someone important in your life. A birthday, something they're into, anything worth remembering.`;
+      await messages.logOutbound({ userId: user.id, body: reply, messageType: 'onboarding' });
+      return reply;
+    }
+    // else: fall through into the real pipeline below - their message has
+    // actual content the model should extract right now.
+  }
 
   // STAGE B3 — abuse cap (cost survival; runs before any model call)
   const { allowed } = await checkRateLimit(user.id);
   if (!allowed) {
-    const reply = "You've reached today's limit - I'll be right here tomorrow.";
+    const reply = MSG_RATE_LIMIT;
     await messages.logOutbound({ userId: user.id, body: reply, messageType: 'system' });
     return reply;
   }
