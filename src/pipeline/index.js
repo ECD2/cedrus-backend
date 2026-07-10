@@ -89,7 +89,7 @@ export async function runInboundPipeline({ from, body, messageSid, numSegments }
   } catch (err) {
     logger.error('Understand step failed', err);
     await usage.logAgentRun({ userId: user.id, runType: 'inbound_parse', triggerMessageId: message.id, model: 'unknown', success: false, errorMessage: String(err), latencyMs: Date.now() - t0 });
-    const reply = "Hmm, I had trouble with that — mind saying it another way?";
+    const reply = "Hmm, I had trouble with that. Mind saying it another way?";
     await messages.logOutbound({ userId: user.id, body: reply, messageType: 'reply' });
     return reply;
   }

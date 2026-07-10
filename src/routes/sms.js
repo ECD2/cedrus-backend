@@ -26,7 +26,7 @@ router.post('/inbound', async (req, res) => {
     replyText = await runInboundPipeline(payload);
   } catch (err) {
     logger.error('Pipeline error', err);
-    replyText = 'Hmm, something went wrong on my end — try that again in a moment.';
+    replyText = 'Hmm, something went wrong on my end. Try that again in a moment.';
   }
 
   // STAGE E (MVP, synchronous) — reply via TwiML. If processing ever exceeds
