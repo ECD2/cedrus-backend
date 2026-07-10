@@ -1,6 +1,15 @@
 import { supabase } from '../lib/supabase.js';
 import * as people from './people.js';
 
+// True if this user has never had a single message logged - true for a real
+// brand-new account, and also true right after an admin reset (which wipes
+// messages but deliberately keeps the account row itself).
+export async function hasNoHistory(userId) {
+  const { count } = await supabase.from('messages')
+    .select('*', { count: 'exact', head: true }).eq('user_id', userId);
+  return !count;
+}
+
 export async function logInbound({ userId, body, messageSid, numSegments }) {
   // Idempotency: a retried Twilio webhook carries the same MessageSid.
   if (messageSid) {

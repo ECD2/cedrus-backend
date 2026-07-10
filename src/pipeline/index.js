@@ -31,10 +31,12 @@ export async function runInboundPipeline({ from, body, messageSid, numSegments }
     return compliance.reply; // STOP → null reply; carrier sends its own confirmation
   }
 
-  // New user → the EXACT Twilio-approved opt-in text, verbatim, first and alone.
-  // It already ends by asking "who's someone important in your life?", so we
-  // don't ask a separate onboarding question on top of it.
-  if (isNew) {
+  // New user OR an admin-reset user (same account row, zero history) → the
+  // EXACT Twilio-approved opt-in text, verbatim, first and alone. It already
+  // ends by asking "who's someone important in your life?", so we don't ask
+  // a separate onboarding question on top of it.
+  const needsFreshStart = isNew || (!user.onboarding_complete && await messages.hasNoHistory(user.id));
+  if (needsFreshStart) {
     await messages.logInbound({ userId: user.id, body, messageSid, numSegments });
     await messages.logOutbound({ userId: user.id, body: MSG_COMPLIANCE, messageType: 'onboarding' });
     return MSG_COMPLIANCE;
