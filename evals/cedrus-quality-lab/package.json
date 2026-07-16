@@ -1,0 +1,8 @@
+{
+  "name": "cedrus-quality-lab",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node runner/run.mjs"
+  }
+}

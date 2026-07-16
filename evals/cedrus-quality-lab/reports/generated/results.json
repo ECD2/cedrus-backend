@@ -1,0 +1,342 @@
+{
+  "generated_at": "2026-07-12T22:52:42.314Z",
+  "fixtures": 34,
+  "passed": 34,
+  "failed": 0,
+  "mandatory_failures": 0,
+  "output_file": "/Users/ec/Desktop/Desktop - EC’s MacBook Air/cedrus-backend/evals/cedrus-quality-lab/mocks/golden-outputs.json",
+  "results": [
+    {
+      "id": "relationship-correction",
+      "title": "Daniela changes from girlfriend to ex-girlfriend",
+      "category": "relationship",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "alias-relationship",
+      "title": "Relationship canonical key",
+      "category": "aliases",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "alias-relationship-status",
+      "title": "relationship_status alias",
+      "category": "aliases",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "alias-relation",
+      "title": "relation alias",
+      "category": "aliases",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "alias-connection",
+      "title": "connection alias",
+      "category": "aliases",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "alias-partner-status",
+      "title": "partner_status alias",
+      "category": "aliases",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "tautology-judy",
+      "title": "Reject Judy likes jewelry tautology",
+      "category": "specificity",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "specific-mom-jewelry",
+      "title": "Preserve specific jewelry preferences",
+      "category": "specificity",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "vague-travel",
+      "title": "Do not invent travel specificity",
+      "category": "specificity",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "vague-sports",
+      "title": "Do not invent sports specificity",
+      "category": "specificity",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "favorite-color-change",
+      "title": "Favorite color correction",
+      "category": "correction",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "person-moved",
+      "title": "City update",
+      "category": "correction",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "job-change",
+      "title": "Job update",
+      "category": "correction",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "birthday-correction",
+      "title": "Birthday correction",
+      "category": "correction",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "name-correction",
+      "title": "Misspelled name correction",
+      "category": "correction",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "relationship-restarted",
+      "title": "Relationship restarted",
+      "category": "correction",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "earlier-was-test",
+      "title": "Earlier statement was a test",
+      "category": "correction",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "breakup",
+      "title": "Breakup acknowledgment",
+      "category": "emotion",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "family-death",
+      "title": "Death in the family",
+      "category": "emotion",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "job-loss",
+      "title": "Job loss",
+      "category": "emotion",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "disagreement",
+      "title": "Serious disagreement",
+      "category": "emotion",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "reconnecting",
+      "title": "Reconnecting with old friend",
+      "category": "emotion",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "address-update",
+      "title": "Routine address update",
+      "category": "emotion",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "preference-update",
+      "title": "Ordinary preference update",
+      "category": "emotion",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "same-name",
+      "title": "Two people share a name",
+      "category": "ambiguity",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": true
+    },
+    {
+      "id": "unclear-pronoun",
+      "title": "Unclear pronoun",
+      "category": "ambiguity",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": true
+    },
+    {
+      "id": "uncertain-relationship",
+      "title": "Uncertain relationship",
+      "category": "ambiguity",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": true
+    },
+    {
+      "id": "conflicting-dates",
+      "title": "Conflicting birthday dates",
+      "category": "ambiguity",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": true
+    },
+    {
+      "id": "sarcasm",
+      "title": "Sarcasm is not literal fact",
+      "category": "ambiguity",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": true
+    },
+    {
+      "id": "hypothetical",
+      "title": "Hypothetical is not fact",
+      "category": "ambiguity",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "testing-false-info",
+      "title": "Explicit false test needs confirmation",
+      "category": "ambiguity",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": true
+    },
+    {
+      "id": "inject-ignore",
+      "title": "Ignore previous instructions payload",
+      "category": "security",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "inject-delete",
+      "title": "Delete and mass-message payload",
+      "category": "security",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    },
+    {
+      "id": "inject-db-tool",
+      "title": "Database and tool payload",
+      "category": "security",
+      "mandatory": true,
+      "pass": true,
+      "failures": [],
+      "human_confirmation_needed": false
+    }
+  ],
+  "source_audit": [
+    {
+      "name": "alias relation",
+      "pass": false
+    },
+    {
+      "name": "alias connection",
+      "pass": false
+    },
+    {
+      "name": "alias partner_status",
+      "pass": false
+    },
+    {
+      "name": "birthday forced single-valued",
+      "pass": false
+    },
+    {
+      "name": "schema validation beyond JSON.parse",
+      "pass": false
+    },
+    {
+      "name": "ambiguous entity is not silently first-picked",
+      "pass": false
+    }
+  ]
+}

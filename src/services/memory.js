@@ -1,15 +1,44 @@
 import { supabase } from '../lib/supabase.js';
 import { mondayOf, localWeekOf } from '../utils/time.js';
 
+// One canonical key per real-world attribute. The prompt instructs the model to
+// emit these; stragglers are normalized here so the same attribute can never
+// fork into two keys (the "relationship" vs "relationship_status" bug that left
+// a girlfriend and an ex-girlfriend both current on one person).
+const FACT_KEY_ALIASES = {
+  relationship_status: 'relationship',
+  relationship_type: 'relationship',
+  relationship_to_user: 'relationship',
+  location: 'city',
+  home: 'city',
+  work: 'job',
+  employer: 'job',
+  career: 'job',
+};
+
+// Attributes that can only have one current value per person. A new value always
+// retires the old row, even when the model forgets to flag supersedes_prior.
+const SINGLE_VALUED_KEYS = new Set(['relationship', 'job', 'city', 'mood']);
+
+export function canonicalFactKey(key) {
+  if (!key) return null;
+  const k = String(key).trim().toLowerCase().replace(/\s+/g, '_');
+  return FACT_KEY_ALIASES[k] || k;
+}
+
 export async function addFact({ userId, personId, factType, factKey, factValue, supersedesPrior, sourceMessageId, confidence }) {
-  // Supersession is single-valued only; the model decides. Multi-valued tastes never reach here with true.
-  if (supersedesPrior && factKey) {
+  const key = canonicalFactKey(factKey);
+  const supersedes = key && (supersedesPrior === true || SINGLE_VALUED_KEYS.has(key));
+  if (supersedes) {
+    // Retire the canonical key AND its aliases, so pre-normalization rows
+    // (e.g. an old relationship_status fact) are superseded too.
+    const keysToRetire = [key, ...Object.keys(FACT_KEY_ALIASES).filter((a) => FACT_KEY_ALIASES[a] === key)];
     await supabase.from('facts')
       .update({ is_current: false, ended_at: new Date().toISOString(), ended_reason: 'superseded' })
-      .eq('person_id', personId).eq('fact_key', factKey).eq('is_current', true);
+      .eq('person_id', personId).in('fact_key', keysToRetire).eq('is_current', true);
   }
   const { error } = await supabase.from('facts').insert({
-    user_id: userId, person_id: personId, fact_type: factType, fact_key: factKey,
+    user_id: userId, person_id: personId, fact_type: factType, fact_key: key,
     fact_value: factValue, source_message_id: sourceMessageId, confidence,
   });
   if (error) throw error;

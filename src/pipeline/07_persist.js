@@ -48,19 +48,27 @@ export async function persist({ user, message, parsed, resolved }) {
     } catch (err) { logger.warn('persist: skipped bad person link', p.mention_text, String(err)); }
   }
 
-  // facts (supersession applied inside addFact when supersedes_prior is true)
+  // facts (supersession + key normalization applied inside addFact)
   for (const f of parsed.facts || []) {
     const personId = ref(f.person_ref);
     if (!personId || !f.fact_value) continue;
+    const factValue = String(f.fact_value).slice(0, 500);
     try {
       await memory.addFact({
         userId: user.id, personId,
         factType: pick(f.fact_type, FACT_TYPES, 'note'),
         factKey: f.fact_key || null,
-        factValue: String(f.fact_value).slice(0, 500),
+        factValue,
         supersedesPrior: f.supersedes_prior === true,
         sourceMessageId: message.id, confidence: clamp01(f.confidence),
       });
+      // A relationship fact is also the person's canonical relationship: keep the
+      // people.relationship column (KNOWN PEOPLE context + dashboard label) in
+      // sync, so a correction ("she's my ex now") actually changes what Cedrus
+      // believes, instead of stacking a fact beside a stale column.
+      if (memory.canonicalFactKey(f.fact_key) === 'relationship') {
+        await people.setRelationship(personId, factValue.slice(0, 100));
+      }
     } catch (err) { logger.warn('persist: skipped bad fact', f.fact_value, String(err)); }
   }
 

@@ -25,6 +25,13 @@ export async function renameSelf(userId, name) {
   await supabase.from('people').update({ name }).eq('user_id', userId).eq('is_self', true);
 }
 
+// Keep the person's canonical relationship-to-user in step with the newest
+// relationship fact (corrections like girlfriend -> ex-girlfriend land here).
+export async function setRelationship(personId, relationship) {
+  if (!personId || !relationship) return;
+  await supabase.from('people').update({ relationship }).eq('id', personId);
+}
+
 // Fuzzy backstop. MVP: exact/contains match. Upgrade to a pg_trgm rpc for typo tolerance.
 // Fix M1: substring matching only for names of 3+ chars, so "Jo" can't silently
 // merge into "Joan" — wrong-person merges are the worst failure for a memory product.
