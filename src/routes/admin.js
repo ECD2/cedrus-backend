@@ -1,38 +1,62 @@
 import { Router } from 'express';
+import crypto from 'node:crypto';
 import { supabase } from '../lib/supabase.js';
+import { config } from '../config.js';
 import { normalizePhone } from '../utils/phone.js';
 import { logger } from '../utils/logger.js';
 
-// ─────────────────────────────────────────────────────────────────────
-// FOUNDER ADMIN PANEL (v1)
-// Simple browser-URL admin actions, protected by the ADMIN_KEY env var.
-// If ADMIN_KEY is not set in Railway, every route here returns 404 —
-// the panel simply doesn't exist.
+// ─────────────────────────────────────────────────────────────────────────
+// FOUNDER ADMIN (v2 — hardened, WS-A items 5 & 9)
 //
-//   Check a user:   https://YOUR-DOMAIN/admin/user?phone=7869727469&key=YOURKEY
-//   Reset a user:   https://YOUR-DOMAIN/admin/reset?phone=7869727469&key=YOURKEY
+// What changed vs the old browser-URL panel, and why (audit A3):
+//  • Auth is a HEADER (`x-admin-key`), never a query-string key. Key-in-URL
+//    leaks to Railway request logs, browser history, proxies and Referer.
+//  • The compare is constant-time (crypto.timingSafeEqual), not `!==`.
+//  • The destructive GET /admin/reset is REMOVED. A destructive GET is
+//    CSRF-able and prefetchable (a link-preview bot could wipe an account).
+//    Its safe replacement is POST /admin/reset-user (below).
+//  • Every reset writes a structured AUDIT log entry. The old reset was
+//    "self-erasing": it deleted the very messages/agent_runs that were the
+//    evidence of what it did. The new reset preserves the audit/compliance
+//    trail and records the action independently (STRUCTURED_LOGGING_SPEC §8
+//    designates the JSON log stream as the durable, DB-independent audit sink;
+//    a DB-side admin_audit table is flagged to WS-C).
 //
-// "Reset" wipes everything Cedrus remembers (people, facts, messages,
-// reminders, goals, nudges, briefs) and puts the account back to
-// brand-new: next text gets the full onboarding again. It KEEPS the
-// account row itself and its web-login link, and keeps consent history
-// (compliance records should never be deleted).
-// ─────────────────────────────────────────────────────────────────────
+// If ADMIN_KEY is unset, every route here returns 404 — the panel doesn't exist.
+// Browser-URL access is intentionally gone; use curl/the Cycle-2 admin panel:
+//   curl -sS -X POST https://YOUR-DOMAIN/admin/reset-user \
+//        -H "x-admin-key: $ADMIN_KEY" -H 'content-type: application/json' \
+//        -d '{"phone":"7869727469"}'
+// ─────────────────────────────────────────────────────────────────────────
 
 const router = Router();
 
+// Constant-time key comparison. Returns false on any length/type mismatch
+// without leaking timing about how much of the key matched.
+function keyMatches(provided) {
+  const expected = config.adminKey;
+  if (!expected || typeof provided !== 'string') return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
 router.use((req, res, next) => {
-  const expected = process.env.ADMIN_KEY;
-  if (!expected) return res.status(404).send('Not found');
-  if (req.query.key !== expected) return res.status(403).send('Forbidden');
+  if (!config.adminKey) return res.status(404).send('Not found');
+  const provided = req.get('x-admin-key');
+  if (!keyMatches(provided)) {
+    logger.event('admin.auth.rejected', { level: 'warn', error_category: 'auth', status_code: 403, message: req.method + ' ' + req.path });
+    return res.status(403).send('Forbidden');
+  }
   next();
 });
 
-async function findUser(req, res) {
-  const phone = normalizePhone(req.query.phone);
-  if (!phone) { res.status(400).json({ error: 'Add ?phone=... to the URL' }); return null; }
+async function findUserByPhone(rawPhone, res) {
+  const phone = normalizePhone(rawPhone);
+  if (!phone) { res.status(400).json({ error: 'phone is required' }); return null; }
   const { data: user } = await supabase.from('app_users').select('*').eq('phone', phone).maybeSingle();
-  if (!user) { res.status(404).json({ found: false, phone }); return null; }
+  if (!user) { res.status(404).json({ found: false }); return null; }
   return user;
 }
 
@@ -42,17 +66,19 @@ async function countFor(table, userId) {
   return count || 0;
 }
 
-// GET /admin/user — quick snapshot of what Cedrus knows about an account
-router.get('/user', async (req, res) => {
-  const user = await findUser(req, res);
+// POST /admin/user — snapshot of what Cedrus knows about an account.
+// POST (not GET) + body so the phone never rides in a URL/query string.
+router.post('/user', async (req, res) => {
+  const user = await findUserByPhone(req.body?.phone, res);
   if (!user) return;
   const [people, facts, messages, reminders] = await Promise.all([
     countFor('people', user.id), countFor('facts', user.id),
     countFor('messages', user.id), countFor('reminders', user.id),
   ]);
+  logger.event('admin.user.viewed', { user_ref: 'u_' + user.id });
   res.json({
     found: true,
-    phone: user.phone,
+    user_ref: 'u_' + user.id, // no raw phone in the response body
     name: user.name,
     plan: user.plan,
     onboarding_complete: user.onboarding_complete,
@@ -61,28 +87,64 @@ router.get('/user', async (req, res) => {
   });
 });
 
-// GET /admin/reset — wipe memory, keep identity. Next text = fresh onboarding.
-router.get('/reset', async (req, res) => {
-  const user = await findUser(req, res);
+// Product-memory tables cleared by a reset, in child-first order so FK
+// constraints are satisfied. This is the FULL enumeration required by item 9.
+//
+// PRESERVED (never deleted) — audit / compliance / billing evidence:
+//   • consent_events   — opt-in/opt-out compliance history (non-negotiable)
+//   • subscriptions    — billing/entitlement evidence
+//   • agent_runs       — LLM cost/latency audit (item 5: stop wiping this)
+//   • integrations     — external-account links (not product memory)
+// The account row (app_users) is KEPT and rewound (identity + web-login link
+// stay); people rows are cleared except the is_self row, which is blanked.
+const RESET_TABLES = [
+  'pending_prompts', 'nudges', 'brief_items', 'briefs', 'reminders',
+  'user_goals', 'contact_events', 'message_people', 'facts', 'saved_items',
+  'core_circle_candidates', 'core_circle_runs', 'person_merges',
+  'messages', // cleared LAST among children so from-zero onboarding fires
+];
+
+// POST /admin/reset-user — per-user, safe, allow-listed reset (item 9).
+// Rewinds ONLY the target user's product data so they can restart onboarding
+// from zero. Backend for a future admin panel (Cycle 2); no UI here.
+router.post('/reset-user', async (req, res) => {
+  const rawPhone = req.body?.phone;
+  const phone = normalizePhone(rawPhone);
+
+  // Hard gate: refuse unless the target is on the explicit TESTER_PHONES
+  // allow-list. This is a testing tool for Emil + beta testers, never a
+  // general "wipe any account" lever.
+  if (!phone || !config.testerPhones.includes(phone)) {
+    logger.event('admin.reset_user.denied', {
+      level: 'warn', error_category: 'auth', status_code: 403,
+      user_ref: phone ? 'ph_' + phone.slice(-4) : undefined,
+      reason: 'not_on_tester_allowlist',
+    });
+    return res.status(403).json({ reset: false, error: 'phone is not on the TESTER_PHONES allowlist' });
+  }
+
+  const user = await findUserByPhone(rawPhone, res);
   if (!user) return;
   const uid = user.id;
+  const userRef = 'u_' + uid;
+
   try {
-    // Children first (all carry user_id). consent_events intentionally kept.
-    const tables = [
-      'pending_prompts', 'nudges', 'brief_items', 'briefs', 'reminders',
-      'user_goals', 'contact_events', 'message_people', 'facts',
-      'saved_items', 'agent_runs', 'messages',
-    ];
-    for (const t of tables) {
+    const deleted = {};
+    for (const t of RESET_TABLES) {
+      const before = await countFor(t, uid);
       const { error } = await supabase.from(t).delete().eq('user_id', uid);
       if (error) throw new Error(`${t}: ${error.message}`);
+      deleted[t] = before;
     }
-    // Remove everyone except the self record; blank the self record's name.
+    // Remove everyone except the self record; blank the self record so a fresh
+    // onboarding can re-name it. (consent_events/subscriptions untouched.)
     await supabase.from('people').delete().eq('user_id', uid).eq('is_self', false);
     await supabase.from('people').update({
       name: 'Me', last_contact_at: null, last_nudged_at: null,
     }).eq('user_id', uid).eq('is_self', true);
-    // Back to brand-new: onboarding again, fresh 14-day trial.
+
+    // Back to brand-new: onboarding again, fresh 14-day trial. Keep the account
+    // row + web-login link + consent history.
     await supabase.from('app_users').update({
       name: null,
       onboarding_complete: false,
@@ -99,11 +161,22 @@ router.get('/reset', async (req, res) => {
       opted_out_at: null,
     }).eq('id', uid);
 
-    logger.info(`ADMIN: reset user ${user.phone}`);
-    res.json({ reset: true, phone: user.phone, note: 'Next text to Cedrus starts onboarding from scratch.' });
+    // AUDIT ENTRY (item 9). Durable, PII-free record of the action — proves the
+    // reset happened and what it cleared, independent of the now-deleted data.
+    logger.event('admin.reset_user', {
+      user_ref: userRef, outcome: 'accepted',
+      meta: { deleted_counts: deleted, preserved: ['consent_events', 'subscriptions', 'agent_runs', 'integrations'] },
+    });
+
+    res.json({
+      reset: true, user_ref: userRef,
+      note: 'Next text to Cedrus starts onboarding from scratch.',
+      cleared: deleted,
+      preserved: ['consent_events', 'subscriptions', 'agent_runs', 'integrations'],
+    });
   } catch (err) {
-    logger.error('ADMIN reset failed', err);
-    res.status(500).json({ reset: false, error: String(err.message || err) });
+    logger.event('admin.reset_user.failed', { level: 'error', user_ref: userRef, error_category: 'db_error', message: err?.message || String(err) });
+    res.status(500).json({ reset: false, error: 'reset failed' });
   }
 });
 

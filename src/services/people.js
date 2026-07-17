@@ -1,5 +1,35 @@
 import { supabase } from '../lib/supabase.js';
 
+// ─────────────────────────────────────────────────────────────────────────
+// OWNERSHIP GUARD (WS-A item 3 — the cross-tenant-write backstop)
+//
+// The backend uses the Supabase SERVICE-ROLE client, which BYPASSES RLS
+// (lib/supabase.js). That means the database provides NO tenant isolation for
+// these queries — every `.eq('user_id', …)` predicate is the ONLY thing
+// stopping one user's write from landing on another user's row. Historically
+// three writers here (rename / setRelationship / markNudged) mutated by
+// `person_id` ALONE, so a model-supplied or hallucinated foreign person_id
+// (see 06_resolveEntities.js, WS-B's file) could write across tenants.
+//
+// New rule for this service: EVERY read and write is scoped by `user_id`, and
+// every write REQUIRES the owning userId. A write whose (user_id, person_id)
+// pair doesn't exist affects zero rows — a foreign person_id is silently
+// rejected instead of clobbering another tenant. `requireUser()` fails closed
+// if a caller forgets to pass ownership context.
+//
+// NOTE (flagged to WS-B, docs/WSA_FLAGS_FOR_WSB.md): rename() and
+// setRelationship() are also called from src/pipeline/07_persist.js, which WS-A
+// must not edit. Those two calls must be updated to pass `user.id`
+// (persist already has it in scope). Until then those specific writes fail
+// closed (a caught no-op) rather than performing an unscoped write.
+// ─────────────────────────────────────────────────────────────────────────
+
+function requireUser(userId, fn) {
+  if (!userId || typeof userId !== 'string') {
+    throw new Error(`people.${fn}: userId is required (ownership guard) — refusing an unscoped write`);
+  }
+}
+
 export async function listForUser(userId) {
   const { data } = await supabase.from('people')
     .select('id, name, aliases, relationship, is_self')
@@ -8,6 +38,7 @@ export async function listForUser(userId) {
 }
 
 export async function create(userId, { name, relationship = null, aliases = [] }) {
+  requireUser(userId, 'create');
   const { data, error } = await supabase.from('people')
     .insert({ user_id: userId, name, relationship, aliases }).select('*').single();
   if (error) throw error;
@@ -15,21 +46,29 @@ export async function create(userId, { name, relationship = null, aliases = [] }
 }
 
 // Rename an existing person (e.g. the user corrected a misheard/misspelled name).
-export async function rename(personId, name) {
+// Scoped by user_id: a person_id that isn't this user's is a no-op, not a
+// cross-tenant write.
+export async function rename(userId, personId, name) {
+  requireUser(userId, 'rename');
   if (!personId || !name) return;
-  await supabase.from('people').update({ name }).eq('id', personId);
+  await supabase.from('people').update({ name })
+    .eq('id', personId).eq('user_id', userId);
 }
 
 // Rename the user's own is_self person (set during onboarding — Fix C3).
 export async function renameSelf(userId, name) {
-  await supabase.from('people').update({ name }).eq('user_id', userId).eq('is_self', true);
+  requireUser(userId, 'renameSelf');
+  await supabase.from('people').update({ name })
+    .eq('user_id', userId).eq('is_self', true);
 }
 
 // Keep the person's canonical relationship-to-user in step with the newest
 // relationship fact (corrections like girlfriend -> ex-girlfriend land here).
-export async function setRelationship(personId, relationship) {
+export async function setRelationship(userId, personId, relationship) {
+  requireUser(userId, 'setRelationship');
   if (!personId || !relationship) return;
-  await supabase.from('people').update({ relationship }).eq('id', personId);
+  await supabase.from('people').update({ relationship })
+    .eq('id', personId).eq('user_id', userId);
 }
 
 // Fuzzy backstop. MVP: exact/contains match. Upgrade to a pg_trgm rpc for typo tolerance.
@@ -69,9 +108,12 @@ export async function getBirthdaysForUser(userId) {
   return data || [];
 }
 
-export async function markNudged(personId) {
+// Scoped by user_id: markNudged never touches a person that isn't this user's.
+export async function markNudged(userId, personId) {
+  requireUser(userId, 'markNudged');
   if (!personId) return;
-  await supabase.from('people').update({ last_nudged_at: new Date().toISOString() }).eq('id', personId);
+  await supabase.from('people').update({ last_nudged_at: new Date().toISOString() })
+    .eq('id', personId).eq('user_id', userId);
 }
 
 // Per-person nudge cooldown data (avoid nudging about the same person too often).

@@ -26,14 +26,34 @@ export async function logInbound({ userId, body, messageSid, numSegments }) {
   return { message: data, duplicate: false };
 }
 
-export async function logOutbound({ userId, body, messageType = 'reply', providerMessageId = null, segments = 1 }) {
+export async function logOutbound({ userId, body, messageType = 'reply', providerMessageId = null, segments = 1, providerStatus = null }) {
   const { data, error } = await supabase.from('messages').insert({
     user_id: userId, direction: 'outbound', channel: 'sms', body, message_type: messageType,
-    provider: 'twilio', provider_message_id: providerMessageId, sms_segments: segments,
-    sent_at: new Date().toISOString(),
+    provider: 'twilio', provider_message_id: providerMessageId, provider_status: providerStatus,
+    sms_segments: segments, sent_at: new Date().toISOString(),
   }).select('*').single();
   if (error) throw error;
   return data;
+}
+
+// Record a Twilio delivery-status callback (item 8) against the outbound row
+// with this provider SID. Scoped to outbound so an inbound SID can never be
+// mutated. Returns the updated row (or null if we have no record of that SID —
+// e.g. a callback for a message sent before this code shipped).
+export async function recordDeliveryStatus({ providerMessageId, status, errorCode = null, raw = null }) {
+  if (!providerMessageId || !status) return null;
+  const patch = { provider_status: status };
+  if (raw) {
+    patch.provider_payload = {
+      last_status: status, error_code: errorCode || null,
+      updated_at: new Date().toISOString(),
+    };
+  }
+  const { data } = await supabase.from('messages')
+    .update(patch)
+    .eq('provider', 'twilio').eq('provider_message_id', providerMessageId).eq('direction', 'outbound')
+    .select('id, user_id, message_type, provider_status');
+  return (data && data[0]) || null;
 }
 
 // Everything the model needs to interpret an inbound message.

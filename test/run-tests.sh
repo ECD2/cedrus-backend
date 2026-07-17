@@ -1,16 +1,51 @@
 #!/bin/sh
-# Runs the fact-pipeline tests with no dependencies: uses node if installed,
-# otherwise falls back to macOS's bundled JavaScriptCore (jsc).
+# Dependency-free test runner. Prefers bun (this machine's runtime), then node,
+# then macOS's bundled JavaScriptCore (jsc).
 #
-# The src files are plain ESM; we strip import/export and concatenate them after
-# in-memory stubs (test/stubs.js), so the REAL memory.js/persist.js logic runs
-# against a fake facts table.
+# Each "bundle" concatenates in-memory stubs + the REAL src files (with their
+# import/export lines stripped) + a proof test, so the actual production logic
+# runs against fakes with no node_modules required.
 set -e
 cd "$(dirname "$0")/.."
+
+JSC=/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc
+
+run_js() {
+  if command -v bun >/dev/null 2>&1; then bun "$1"
+  elif command -v node >/dev/null 2>&1; then node "$1"
+  else "$JSC" "$1"; fi
+}
+
+# Strip ESM import/export syntax so files can be concatenated into one script.
+strip() {
+  sed -e '/^import /d' \
+      -e '/^export {/d' \
+      -e '/^export default/d' \
+      -e 's/^export async function/async function/' \
+      -e 's/^export function/function/' \
+      -e 's/^export const/const/' "$1"
+}
+
+# Build a bundle from a list of files. Files under src/ are stripped; everything
+# else (stubs, tests) is included verbatim.
+bundle() {
+  out="$(mktemp -t cedrus-test).js"
+  : > "$out"
+  for f in "$@"; do
+    case "$f" in
+      src/*) strip "$f" >> "$out" ;;
+      *)     cat "$f"    >> "$out" ;;
+    esac
+    printf '\n' >> "$out"
+  done
+  printf '%s\n' "$out"
+}
+
+section() { printf '\n══════ %s ══════\n' "$1"; }
+
+# ── Bundle 1: fact pipeline (original) ──────────────────────────────────────
+section "fact pipeline"
 OUT="$(mktemp -t cedrus-tests).js"
-
-strip() { sed -e '/^import /d' -e 's/^export async function/async function/' -e 's/^export function/function/' -e 's/^export const/const/' "$1"; }
-
 {
   cat test/stubs.js
   strip src/services/memory.js
@@ -19,10 +54,30 @@ strip() { sed -e '/^import /d' -e 's/^export async function/async function/' -e 
   strip src/pipeline/07_persist.js
   cat test/fact-supersession.test.js
 } > "$OUT"
+run_js "$OUT"
 
-if command -v node >/dev/null 2>&1; then
-  node "$OUT"
-else
-  JSC=/System/Library/Frameworks/JavaScriptCore.framework/Versions/Current/Helpers/jsc
-  "$JSC" "$OUT"
-fi
+# ── Bundle 2: structured logger + sensitivity lane (item 7) ─────────────────
+section "structured logger"
+run_js "$(bundle test/reliability-core.js src/utils/logger.js test/logger.test.js)"
+
+# ── Bundle 3: reminder double-send / retryable failure (item 1) ─────────────
+section "reminder dispatch"
+run_js "$(bundle test/reliability-core.js test/reliability-stubs.js src/jobs/reminders.js test/reminders.test.js)"
+
+# ── Bundle 4: people ownership guard (item 3) ───────────────────────────────
+section "people ownership guard"
+run_js "$(bundle test/reliability-core.js src/services/people.js test/people-ownership.test.js)"
+
+# ── Bundle 5: duplicate signed inbound is a no-op ───────────────────────────
+section "inbound dedup"
+run_js "$(bundle test/reliability-core.js test/reliability-stubs.js src/services/messages.js test/messages-dedup.test.js)"
+
+# ── Bundle 6: brief marked sent only after a confirmed send (item 2) ────────
+section "weekly brief send ordering"
+run_js "$(bundle test/reliability-core.js test/reliability-stubs.js src/jobs/weeklyBrief.js test/brief.test.js)"
+
+# ── Bundle 7: Twilio signature hardening (item 4) ───────────────────────────
+section "twilio signature"
+run_js "$(bundle test/reliability-core.js test/prelude-twilio.js src/lib/twilio.js test/signature.test.js)"
+
+printf '\n✅ All test bundles passed.\n'

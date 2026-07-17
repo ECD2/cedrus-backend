@@ -56,21 +56,39 @@ export async function sendBriefTo(user, now = new Date()) {
       body: `${plan.teaser.count} outside circle slipping: ${plan.teaser.names.join(', ')}`,
     });
   }
-  await briefs.markSent({ briefId: brief.id, summary: composed.text });
 
-  // Send (or dry-run log while Twilio registration is pending)
+  // ── Item 2: SEND FIRST, mark sent only after a confirmed success ──
+  // The old order called markSent() BEFORE sendSms(): a crash (or a Twilio
+  // failure) after markSent left the brief flagged 'sent' but never delivered,
+  // and eligibility skips 'sent' briefs forever → a silently missed brief.
+  // Now a failed send throws out of here; the briefs row stays 'generated' and
+  // the next hourly tick retries it (clearBriefItems above prevents dup items).
   let providerId = null;
+  let providerStatus = 'dry_run';
   const segments = estimateSegments(composed.text);
   if (config.briefDryRun) {
-    logger.info(`weeklyBrief DRY RUN for ${user.id} → ${user.phone}\n${composed.text}`);
+    // Never log the phone or the composed body (A8). body_len only.
+    logger.event('brief.dry_run', {
+      brief_id: brief.id, user_ref: 'u_' + user.id, message_type: 'weekly_brief',
+      body_len: composed.text.length, segments,
+    });
   } else {
-    const sent = await sendSms(user.phone, composed.text);
+    const sent = await sendSms(user.phone, composed.text); // throws on failure ⇒ stays 'generated'
     providerId = sent?.sid || null;
+    providerStatus = sent?.status || 'queued';
   }
+
+  // Send confirmed (or dry-run). NOW it's safe to mark the brief sent.
+  await briefs.markSent({ briefId: brief.id, summary: composed.text });
 
   const msg = await messages.logOutbound({
     userId: user.id, body: composed.text, messageType: 'weekly_brief',
-    providerMessageId: providerId, segments,
+    providerMessageId: providerId, segments, providerStatus,
+  });
+  logger.event('brief.sent', {
+    brief_id: brief.id, user_ref: 'u_' + user.id, provider_id: 'twilio',
+    provider_message_id: providerId || undefined, message_type: 'weekly_brief',
+    body_len: composed.text.length, segments, outcome: 'sent',
   });
 
   // ONE pending prompt for the closing question — keeps the reply matchable, and
@@ -82,7 +100,7 @@ export async function sendBriefTo(user, now = new Date()) {
   });
 
   await usersSvc.recordBriefSent(user.id);
-  logger.info(`weeklyBrief sent to ${user.id} — ${plan.items.length} item(s), tier ${plan.planTier}`);
+  // (terminal outcome already logged above as brief.sent — one per unit of work)
 }
 
 // Side-effect-free: gather → select → compose, return the text. For tuning the

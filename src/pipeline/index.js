@@ -22,11 +22,24 @@ export async function runInboundPipeline({ from, body, messageSid, numSegments }
   // STAGE B1 — identify (find or create user; DB trigger makes their self-person)
   const { user, isNew } = await users.findOrCreateByPhone(from);
   await users.touchActive(user.id);
+  logger.addContext({ user_ref: 'u_' + user.id });
+
+  // Decide fresh-start BEFORE logging this inbound — hasNoHistory() counts the
+  // messages table, and the log call below would otherwise make history=1 and
+  // hide a real admin-reset user's fresh start.
+  const needsFreshStart = isNew || (!user.onboarding_complete && await messages.hasNoHistory(user.id));
+
+  // STAGE B4 — log inbound ONCE, up front, and honor the duplicate flag across
+  // EVERY downstream path. A replayed Twilio webhook (same MessageSid) is now a
+  // no-op for compliance, onboarding AND normal messages — so a replayed signed
+  // STOP or a replayed first message can never reprocess (the fix the WS-A brief
+  // calls out: compliance/onboarding paths used to ignore this flag).
+  const { message, duplicate } = await messages.logInbound({ userId: user.id, body, messageSid, numSegments });
+  if (duplicate) { logger.event('sms.inbound.duplicate', { level: 'warn', trace_stage: 'finalize', provider_message_id: messageSid, error_category: 'idempotent_skip', outcome: 'duplicate' }); return null; }
 
   // STAGE B2 — compliance (STOP/START/HELP short-circuit everything)
   const compliance = await handleCompliance({ user, body });
   if (compliance.handled) {
-    await messages.logInbound({ userId: user.id, body, messageSid, numSegments });
     if (compliance.reply) await messages.logOutbound({ userId: user.id, body: compliance.reply, messageType: 'system' });
     return compliance.reply; // STOP → null reply; carrier sends its own confirmation
   }
@@ -35,17 +48,10 @@ export async function runInboundPipeline({ from, body, messageSid, numSegments }
   // EXACT Twilio-approved opt-in text, verbatim, first and alone. It already
   // ends by asking "who's someone important in your life?", so we don't ask
   // a separate onboarding question on top of it.
-  const needsFreshStart = isNew || (!user.onboarding_complete && await messages.hasNoHistory(user.id));
   if (needsFreshStart) {
-    await messages.logInbound({ userId: user.id, body, messageSid, numSegments });
     await messages.logOutbound({ userId: user.id, body: MSG_COMPLIANCE, messageType: 'onboarding' });
     return MSG_COMPLIANCE;
   }
-
-  // STAGE B4 — log inbound (idempotent: a Twilio retry is a no-op). Moved above
-  // the onboarding-completion check so both paths share one log call.
-  const { message, duplicate } = await messages.logInbound({ userId: user.id, body, messageSid, numSegments });
-  if (duplicate) { logger.info('Duplicate webhook ignored', messageSid); return null; }
 
   // Their FIRST reply after the approved script answers "who's someone
   // important in your life?" - that's real content, not smalltalk. Capture a

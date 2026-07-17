@@ -43,7 +43,11 @@ async function nudgeUser(user, now) {
   let providerId = null;
   const segments = estimateSegments(composed.text);
   if (config.briefDryRun) {
-    logger.info(`dailySweeps DRY RUN for ${user.id} → ${user.phone}\n${composed.text}`);
+    // Never log the phone or the composed body (A8). body_len only.
+    logger.event('nudge.dry_run', {
+      user_ref: 'u_' + user.id, message_type: 'nudge',
+      body_len: composed.text.length, segments,
+    });
   } else {
     const sent = await sendSms(user.phone, composed.text);
     providerId = sent?.sid || null;
@@ -54,7 +58,7 @@ async function nudgeUser(user, now) {
     providerMessageId: providerId, segments,
   });
   await rel.markNudgeSent({ nudgeId: nudgeRow.id, sentMessageId: msg.id });
-  await people.markNudged(nudge.personId);
+  await people.markNudged(user.id, nudge.personId); // ownership-scoped (item 3)
 
   // Goal follow-ups ask a tracked question → open a pending prompt so the eventual
   // "yes" matches, fires the showing-up cascade, and completes the goal.
