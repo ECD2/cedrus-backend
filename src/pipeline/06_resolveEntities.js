@@ -5,6 +5,10 @@ import * as people from '../services/people.js';
 export async function resolveEntities({ user, parsed }) {
   const personByMention = {};
 
+  // Priority 0: a crisis/boundary turn extracts and creates nothing. Crisis
+  // content must never flow into ordinary storage (safety spec §7).
+  if (parsed._suppressPersistence) return { personByMention };
+
   for (const p of parsed.people || []) {
     if ((p.resolution === 'existing' || p.resolution === 'self') && p.person_id) {
       personByMention[p.mention_text] = p.person_id;

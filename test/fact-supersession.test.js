@@ -82,6 +82,71 @@
   check('people.relationship column synced', __calls.setRelationship.length === 1 && __calls.setRelationship[0][0] === 'p1' && __calls.setRelationship[0][1] === 'ex-girlfriend',
     JSON.stringify(__calls.setRelationship));
 
+  // ── Priority 2a: tautological facts dropped before they persist ──────────
+  println('Priority 2a: tautological key/value collisions are dropped (code disposes)');
+  check('key == value is tautological', isTautologicalFact('jewelry', 'jewelry') === true);
+  check('"likes X" under key X is tautological', isTautologicalFact('jewelry', 'likes jewelry') === true);
+  check('bare "loves" is tautological', isTautologicalFact('music', 'loves') === true);
+  check('informative value is kept', isTautologicalFact('jewelry', 'gold; wants a necklace') === false);
+  check('specific value is kept', isTautologicalFact('job', 'Stripe') === false);
+
+  __db.facts.length = 0;
+  await persist({
+    user: { id: 'u1', timezone: 'America/New_York' }, message: { id: 'm20' },
+    parsed: {
+      people: [{ mention_text: 'Ana', resolution: 'existing', person_id: 'p1', contact_signal: 'none', sentiment: 'neutral', confidence: 0.9 }],
+      facts: [
+        { person_ref: 'Ana', fact_type: 'interest', fact_key: 'jewelry', fact_value: 'likes jewelry', supersedes_prior: false, confidence: 0.9 },
+        { person_ref: 'Ana', fact_type: 'interest', fact_key: 'music', fact_value: 'jazz', supersedes_prior: false, confidence: 0.9 },
+      ],
+      saved_items: [], reminders: [], goals: [], prompt_answer: null,
+    },
+    resolved: { personByMention: { Ana: 'p1' } },
+  });
+  check('tautological fact was NOT written', currentFacts('p1', ['jewelry']).length === 0, 'wrote ' + currentFacts('p1', ['jewelry']).length);
+  check('informative fact WAS written', currentFacts('p1', ['music']).length === 1);
+
+  // ── Priority 2b (killing fixture): correction via a THIRD alias key, flag
+  //    forgotten, through the full persist path → one canonical fact + column sync.
+  println('Priority 2b: relationship_type alias correction through persist supersedes + syncs');
+  __db.facts.length = 0;
+  __calls.setRelationship.length = 0;
+  __db.facts.push({ id: 30, user_id: 'u1', person_id: 'p1', fact_type: 'relationship_detail', fact_key: 'relationship', fact_value: 'girlfriend', is_current: true });
+  await persist({
+    user: { id: 'u1', timezone: 'America/New_York' }, message: { id: 'm22' },
+    parsed: {
+      people: [{ mention_text: 'Ana', resolution: 'existing', person_id: 'p1', contact_signal: 'none', sentiment: 'neutral', confidence: 0.9 }],
+      facts: [{ person_ref: 'Ana', fact_type: 'relationship_detail', fact_key: 'relationship_type', fact_value: 'ex-girlfriend', supersedes_prior: false, confidence: 0.9 }],
+      saved_items: [], reminders: [], goals: [], prompt_answer: null,
+    },
+    resolved: { personByMention: { Ana: 'p1' } },
+  });
+  const relAfter = currentFacts('p1', ['relationship', 'relationship_type', 'relationship_status']);
+  check('exactly one current relationship fact', relAfter.length === 1, 'got ' + relAfter.length);
+  check('reflects the correction', relAfter[0] && relAfter[0].fact_value === 'ex-girlfriend');
+  check('people.relationship column synced', __calls.setRelationship.length === 1 && __calls.setRelationship[0][1] === 'ex-girlfriend', JSON.stringify(__calls.setRelationship));
+
+  // ── Priority 0: a suppressed crisis turn writes NO product content (§7) ──
+  println('Priority 0: _suppressPersistence writes nothing (crisis content never persists)');
+  __db.facts.length = 0;
+  __calls.setRelationship.length = 0;
+  __calls.linkMessagePerson.length = 0;
+  __calls.logContact.length = 0;
+  await persist({
+    user: { id: 'u1', timezone: 'America/New_York' }, message: { id: 'm23' },
+    parsed: {
+      _suppressPersistence: true,
+      people: [{ mention_text: 'Ana', resolution: 'existing', person_id: 'p1', contact_signal: 'explicit_contact', sentiment: 'negative', confidence: 0.9 }],
+      facts: [{ person_ref: 'Ana', fact_type: 'mood', fact_key: 'mood', fact_value: 'in crisis', supersedes_prior: true, confidence: 0.9 }],
+      saved_items: [{ person_ref: 'Ana', item_type: 'note', title: 'note' }],
+      reminders: [], goals: [], prompt_answer: null,
+    },
+    resolved: { personByMention: { Ana: 'p1' } },
+  });
+  check('no facts written on suppressed turn', __db.facts.length === 0, 'wrote ' + __db.facts.length);
+  check('no person link written on suppressed turn', __calls.linkMessagePerson.length === 0);
+  check('no relationship column touched on suppressed turn', __calls.setRelationship.length === 0);
+
   println('');
   println(failures === 0 ? 'ALL TESTS PASSED' : failures + ' TEST(S) FAILED');
   if (failures > 0 && typeof process !== 'undefined') process.exit(1);

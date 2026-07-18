@@ -19,8 +19,27 @@ const clamp01 = (n) => (typeof n === 'number' && isFinite(n) ? Math.min(1, Math.
 
 const CONTACT_SIGNALS = ['explicit_contact', 'confirmed_contact', 'implied_contact'];
 
+// ── Priority 2a: a fact whose value merely restates its key carries zero
+// information ("jewelry" / "likes jewelry"). The prompt is told not to emit
+// these, but code disposes: we drop them before they reach Postgres so a model
+// slip can't write a tautological row. Mirrors test/extraction-prompt-cases.mjs.
+export function isTautologicalFact(factKey, factValue) {
+  const key = String(factKey || '').toLowerCase().replace(/_/g, ' ').trim();
+  const val = String(factValue || '').toLowerCase().trim();
+  if (!key || !val) return false;
+  if (val === key) return true;
+  return [
+    `likes ${key}`, `loves ${key}`, `enjoys ${key}`, `is into ${key}`,
+    `into ${key}`, `a fan of ${key}`, `likes`, `loves`, `enjoys`,
+  ].includes(val);
+}
+
 // Writes the model's extraction to Supabase and runs the pending-prompt cascade.
 export async function persist({ user, message, parsed, resolved }) {
+  // Priority 0: a crisis/boundary turn writes NO product content (safety spec §7).
+  // The fixed safety reply has already been chosen; nothing here should run.
+  if (parsed._suppressPersistence) return;
+
   const ref = (m) => resolved.personByMention[m] || null;
 
   // message_people links + contact events
@@ -52,6 +71,11 @@ export async function persist({ user, message, parsed, resolved }) {
   for (const f of parsed.facts || []) {
     const personId = ref(f.person_ref);
     if (!personId || !f.fact_value) continue;
+    // Priority 2a: drop tautological key/value collisions before they persist.
+    if (isTautologicalFact(f.fact_key, f.fact_value)) {
+      logger.warn('persist: dropped tautological fact', f.fact_key, f.fact_value);
+      continue;
+    }
     const factValue = String(f.fact_value).slice(0, 500);
     try {
       await memory.addFact({
