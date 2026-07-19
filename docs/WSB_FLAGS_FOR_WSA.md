@@ -66,10 +66,18 @@ if (await isInSuppressionWindow(user.id)) return; // skip promo/playful this win
 This depends on the WS-C schema column (see WSB_FLAGS_FOR_WSC.md); until then the
 read fails OPEN (returns false) so ordinary reminders keep flowing — by design.
 
-## 4. people.relationship correction sync — no action, FYI
+## 4. people.relationship correction sync — CORRECTED 2026-07-19 (was wrong post-merge)
 
-The landed fix already syncs `people.relationship` from the relationship fact in
-`persist()` via `people.setRelationship` (people.js is yours). WS-B's Priority-1
-work additionally wires the VALENCE check into that same correction path (in
-`voiceGuard.js`), so "girlfriend → ex" now also produces a non-cheerful reply.
-No change needed from WS-A; noted so the two halves aren't seen as conflicting.
+Earlier revisions of this section said the landed fix "already syncs"
+`people.relationship` and needed no action. **On merged main that was false:**
+WS-A's ownership hardening changed `people.rename`/`people.setRelationship` to
+require the owning `userId` first, and `persist()` still used the old 2-arg
+signatures — so both calls failed closed (caught no-ops). Name corrections and
+the relationship-column sync silently did nothing (the fact rows themselves
+still wrote; see WSA_FLAGS_FOR_WSB.md B-1, which called for exactly this fix).
+
+Fixed on `fix/persist-owner-args`: `persist()` now passes `user.id` to both
+calls, and the fact-pipeline test bundle runs the REAL `people.js` (not a
+lenient stub) with rename/sync/cross-tenant regression checks, so a future
+signature drift fails the battery instead of vanishing. WS-B's VALENCE wiring
+on the correction path (`voiceGuard.js`) is unaffected and still holds.

@@ -50,7 +50,10 @@ OUT="$(mktemp -t cedrus-tests).js"
   cat test/stubs.js
   strip src/services/memory.js
   echo 'const memory = { addFact, canonicalFactKey };'
-  echo 'const people = peopleService;'
+  # REAL people.js (ownership guard + user-scoped writes), not a stub: persist's
+  # call signatures into this service are load-bearing and must be exercised.
+  strip src/services/people.js
+  echo 'const people = { rename, setRelationship };'
   strip src/pipeline/07_persist.js
   cat test/fact-supersession.test.js
 } > "$OUT"

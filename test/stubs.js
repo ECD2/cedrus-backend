@@ -3,9 +3,9 @@
 
 const println = typeof print === 'function' ? print : console.log; // jsc has print(), node has console.log
 
-const __db = { facts: [] };
+const __db = { facts: [], people: [] };
 let __idSeq = 100;
-const __calls = { setRelationship: [], linkMessagePerson: [], logContact: [] };
+const __calls = { linkMessagePerson: [], logContact: [] };
 
 // Minimal thenable query-builder covering exactly what memory.js/persist.js use:
 // from().update().eq()/.in() chains, and from().insert().
@@ -49,7 +49,8 @@ const rel = {
   resolvePendingPrompt: async () => false,
 };
 const users = { incrementShowingUp: async () => {} };
-const peopleService = {
-  rename: async () => {},
-  setRelationship: async (personId, relationship) => { __calls.setRelationship.push([personId, relationship]); },
-};
+// people.rename/setRelationship are NOT stubbed here: bundle 1 runs the REAL
+// src/services/people.js (ownership guard included) against __db.people, so a
+// call-signature drift between persist.js and the hardened service fails the
+// tests instead of vanishing into a lenient double. (A lenient stub here is
+// exactly how the 2026-07 rename/setRelationship no-op regression stayed green.)

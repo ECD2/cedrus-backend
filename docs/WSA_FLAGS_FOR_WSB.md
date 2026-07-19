@@ -7,7 +7,7 @@ logging lane; it implemented no crisis/safety detection.
 
 ---
 
-## B-1 (ACTION REQUIRED — small, one line each): thread `user.id` into the two people-service calls in `07_persist.js`
+## B-1 — ✅ RESOLVED 2026-07-19 on `fix/persist-owner-args`: `user.id` threaded into both people-service calls in `07_persist.js`, with regression tests (bundle 1 now runs the real `people.js`). Original flag kept below for history.
 
 WS-A hardened `src/services/people.js` so **every write is scoped by `user_id`**
 (item 3, the cross-tenant-write backstop). The write functions now require the
