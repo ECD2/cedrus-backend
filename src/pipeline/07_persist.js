@@ -50,7 +50,7 @@ export async function persist({ user, message, parsed, resolved }) {
     // existing person instead of the model quietly promising a fix that
     // never lands in the database.
     if (p.corrected_name) {
-      try { await people.rename(personId, p.corrected_name); }
+      try { await people.rename(user.id, personId, p.corrected_name); }
       catch (err) { logger.warn('persist: rename failed', p.corrected_name, String(err)); }
     }
     const signal = pick(p.contact_signal, SIGNALS, 'none');
@@ -91,7 +91,7 @@ export async function persist({ user, message, parsed, resolved }) {
       // sync, so a correction ("she's my ex now") actually changes what Cedrus
       // believes, instead of stacking a fact beside a stale column.
       if (memory.canonicalFactKey(f.fact_key) === 'relationship') {
-        await people.setRelationship(personId, factValue.slice(0, 100));
+        await people.setRelationship(user.id, personId, factValue.slice(0, 100));
       }
     } catch (err) { logger.warn('persist: skipped bad fact', f.fact_value, String(err)); }
   }

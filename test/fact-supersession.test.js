@@ -62,9 +62,20 @@
   check("p2's city not clobbered by p1's move", currentFacts('p2', ['city']).length === 1 && currentFacts('p2', ['city'])[0].fact_value === 'Austin');
 
   // ── persist(): relationship fact syncs people.relationship column ──
+  // Bundle runs the REAL people.js against __db.people, so these assertions
+  // prove the actual column write happens (not that a stub was invoked).
+  const personRow = (id) => __db.people.find((r) => r.id === id);
+  const seedPeople = () => {
+    __db.people.length = 0;
+    __db.people.push(
+      { id: 'p1', user_id: 'u1', name: 'Ana', relationship: 'girlfriend', is_archived: false },
+      // Foreign tenant's person: any write landing here is the cross-tenant bug.
+      { id: 'p9', user_id: 'u2', name: 'Otra', relationship: 'friend', is_archived: false },
+    );
+  };
   println('persist() end-to-end (stubs for twilio-side services)');
   __db.facts.length = 0;
-  __calls.setRelationship.length = 0;
+  seedPeople();
   __db.facts.push({ id: 10, user_id: 'u1', person_id: 'p1', fact_type: 'relationship_detail', fact_key: 'relationship', fact_value: 'girlfriend', is_current: true });
   await persist({
     user: { id: 'u1', timezone: 'America/New_York' },
@@ -79,8 +90,8 @@
   const relNow = currentFacts('p1', ['relationship', 'relationship_status']);
   check('one current relationship fact after persist', relNow.length === 1, 'got ' + relNow.length);
   check('value is the correction', relNow[0] && relNow[0].fact_value === 'ex-girlfriend');
-  check('people.relationship column synced', __calls.setRelationship.length === 1 && __calls.setRelationship[0][0] === 'p1' && __calls.setRelationship[0][1] === 'ex-girlfriend',
-    JSON.stringify(__calls.setRelationship));
+  check('people.relationship column synced', personRow('p1').relationship === 'ex-girlfriend', personRow('p1').relationship);
+  check("foreign tenant's person untouched", personRow('p9').relationship === 'friend');
 
   // ── Priority 2a: tautological facts dropped before they persist ──────────
   println('Priority 2a: tautological key/value collisions are dropped (code disposes)');
@@ -110,7 +121,7 @@
   //    forgotten, through the full persist path → one canonical fact + column sync.
   println('Priority 2b: relationship_type alias correction through persist supersedes + syncs');
   __db.facts.length = 0;
-  __calls.setRelationship.length = 0;
+  seedPeople();
   __db.facts.push({ id: 30, user_id: 'u1', person_id: 'p1', fact_type: 'relationship_detail', fact_key: 'relationship', fact_value: 'girlfriend', is_current: true });
   await persist({
     user: { id: 'u1', timezone: 'America/New_York' }, message: { id: 'm22' },
@@ -124,12 +135,48 @@
   const relAfter = currentFacts('p1', ['relationship', 'relationship_type', 'relationship_status']);
   check('exactly one current relationship fact', relAfter.length === 1, 'got ' + relAfter.length);
   check('reflects the correction', relAfter[0] && relAfter[0].fact_value === 'ex-girlfriend');
-  check('people.relationship column synced', __calls.setRelationship.length === 1 && __calls.setRelationship[0][1] === 'ex-girlfriend', JSON.stringify(__calls.setRelationship));
+  check('people.relationship column synced', personRow('p1').relationship === 'ex-girlfriend', personRow('p1').relationship);
+
+  // ── WS-A ownership regression (the 2026-07 silent no-op): rename +
+  //    relationship sync must pass the OWNING user through to people.js.
+  //    Before the fix, persist called rename(personId, name) — the hardened
+  //    service saw userId=personId, name=undefined, and no-opped. These checks
+  //    run the real service, so that drift can never go green again.
+  println('ownership regression: corrected_name renames the right row, scoped to the owner');
+  __db.facts.length = 0;
+  seedPeople();
+  await persist({
+    user: { id: 'u1', timezone: 'America/New_York' }, message: { id: 'm30' },
+    parsed: {
+      people: [{ mention_text: 'Anna', resolution: 'existing', person_id: 'p1', corrected_name: 'Mariana', contact_signal: 'none', sentiment: 'neutral', confidence: 0.9 }],
+      facts: [], saved_items: [], reminders: [], goals: [], prompt_answer: null,
+    },
+    resolved: { personByMention: { Anna: 'p1' } },
+  });
+  check('person renamed via corrected_name', personRow('p1').name === 'Mariana', personRow('p1').name);
+  check("foreign tenant's person not renamed", personRow('p9').name === 'Otra');
+
+  println('ownership regression: a foreign person_id write affects zero rows');
+  __db.facts.length = 0;
+  seedPeople();
+  await persist({
+    user: { id: 'u1', timezone: 'America/New_York' }, message: { id: 'm31' },
+    parsed: {
+      // Hallucinated/foreign resolution: p9 belongs to u2. The user-scoped
+      // predicate in people.js must make both writes hit zero rows.
+      people: [{ mention_text: 'Otra', resolution: 'existing', person_id: 'p9', corrected_name: 'Hacked', contact_signal: 'none', sentiment: 'neutral', confidence: 0.9 }],
+      facts: [{ person_ref: 'Otra', fact_type: 'relationship_detail', fact_key: 'relationship', fact_value: 'bestie', supersedes_prior: true, confidence: 0.9 }],
+      saved_items: [], reminders: [], goals: [], prompt_answer: null,
+    },
+    resolved: { personByMention: { Otra: 'p9' } },
+  });
+  check("cross-tenant rename rejected (name unchanged)", personRow('p9').name === 'Otra', personRow('p9').name);
+  check("cross-tenant relationship sync rejected", personRow('p9').relationship === 'friend', personRow('p9').relationship);
 
   // ── Priority 0: a suppressed crisis turn writes NO product content (§7) ──
   println('Priority 0: _suppressPersistence writes nothing (crisis content never persists)');
   __db.facts.length = 0;
-  __calls.setRelationship.length = 0;
+  seedPeople();
   __calls.linkMessagePerson.length = 0;
   __calls.logContact.length = 0;
   await persist({
@@ -145,7 +192,7 @@
   });
   check('no facts written on suppressed turn', __db.facts.length === 0, 'wrote ' + __db.facts.length);
   check('no person link written on suppressed turn', __calls.linkMessagePerson.length === 0);
-  check('no relationship column touched on suppressed turn', __calls.setRelationship.length === 0);
+  check('no relationship column touched on suppressed turn', personRow('p1').relationship === 'girlfriend');
 
   println('');
   println(failures === 0 ? 'ALL TESTS PASSED' : failures + ' TEST(S) FAILED');
