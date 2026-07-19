@@ -11,6 +11,7 @@ import { getUsersDueForBrief } from './brief/eligibility.js';
 import { gatherCandidates } from './brief/gather.js';
 import { selectBriefItems } from './brief/select.js';
 import { composeBrief } from './brief/compose.js';
+import { isInSuppressionWindow } from '../services/safetyFlags.js';
 
 // Cron entry (hourly). Sends to every user whose local brief time is now.
 export async function runWeeklyBriefs(now = new Date()) {
@@ -29,8 +30,15 @@ export async function sendBriefTo(user, now = new Date()) {
   const weekOf = user._weekOf || localWeekOf(user.timezone, now);
   const brief = await briefs.createBrief({ userId: user.id, weekOf });
 
+  // Safety spec §6: for 48h after any crisis signal the PROMOTIONAL/PLAYFUL
+  // layer pauses — no Pro teaser, no playful action offers. The factual brief
+  // itself still goes out (the person isn't paused; ordinary content
+  // continues). Fails OPEN until the WS-C column exists (by design).
+  const suppressPromo = await isInSuppressionWindow(user.id);
+  if (suppressPromo) logger.info(`weeklyBrief: promo layer suppressed for user ${user.id} (safety spec §6 window)`);
+
   const candidates = await gatherCandidates(user);
-  const plan = selectBriefItems(user, candidates);
+  const plan = selectBriefItems(user, candidates, { suppressPromo });
 
   const t0 = Date.now();
   const composed = await composeBrief(plan, user);
@@ -106,8 +114,9 @@ export async function sendBriefTo(user, now = new Date()) {
 // Side-effect-free: gather → select → compose, return the text. For tuning the
 // brief on a real user WITHOUT sending, recording, or needing Twilio.
 export async function previewBrief(user) {
+  const suppressPromo = await isInSuppressionWindow(user.id); // preview reality (§6)
   const candidates = await gatherCandidates(user);
-  const plan = selectBriefItems(user, candidates);
+  const plan = selectBriefItems(user, candidates, { suppressPromo });
   const composed = await composeBrief(plan, user);
   return { plan, text: composed.text };
 }

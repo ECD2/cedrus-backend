@@ -59,7 +59,18 @@ const usage = { async logAgentRun() {} };
 
 function getUsersDueForBrief() { return []; }
 function gatherCandidates() { return []; }
-function selectBriefItems() {
+
+// §6 suppression-window double: toggle + call log, so the brief/sweep job tests
+// can prove the jobs consult the window and thread the flag into selection.
+let __suppressionActive = false;
+async function isInSuppressionWindow(_userId) {
+  __calls.push('isInSuppressionWindow');
+  return __suppressionActive;
+}
+
+let __selectOpts = null; // records the opts sendBriefTo passed to selection
+function selectBriefItems(_user, _candidates, opts) {
+  __selectOpts = opts || null;
   return { items: [], teaser: null, goalFollowup: null, planTier: 'free', closingQuestion: 'Who did you reach out to?' };
 }
 async function composeBrief() { return { text: 'Here is your weekly brief.', model: 'gpt-4.1-mini', usage: {} }; }

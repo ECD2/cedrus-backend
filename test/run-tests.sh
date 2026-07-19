@@ -80,4 +80,12 @@ run_js "$(bundle test/reliability-core.js test/reliability-stubs.js src/jobs/wee
 section "twilio signature"
 run_js "$(bundle test/reliability-core.js test/prelude-twilio.js src/lib/twilio.js test/signature.test.js)"
 
+# ── Bundle 8: §6 suppression window — brief promo layer ─────────────────────
+section "brief §6 suppression"
+run_js "$(bundle test/reliability-core.js src/jobs/brief/select.js test/brief-suppression.test.js)"
+
+# ── Bundle 9: §6 suppression window — sweep playful layer ───────────────────
+section "sweep §6 suppression"
+run_js "$(bundle test/reliability-core.js src/jobs/sweeps/select.js test/sweep-suppression.test.js)"
+
 printf '\n✅ All test bundles passed.\n'
