@@ -9,6 +9,7 @@ import { getNudgeableUsers } from './sweeps/eligibility.js';
 import { gatherNudgeCandidates } from './sweeps/candidates.js';
 import { selectNudge } from './sweeps/select.js';
 import { composeNudge } from './sweeps/compose.js';
+import { isInSuppressionWindow } from '../services/safetyFlags.js';
 
 // Cron entry (every 15 min). Sends at most one well-timed nudge per eligible user.
 export async function runDailySweeps(now = new Date()) {
@@ -22,8 +23,16 @@ export async function runDailySweeps(now = new Date()) {
 }
 
 async function nudgeUser(user, now) {
+  // Safety spec §6: for 48h after any crisis signal the playful proactive
+  // layer (drift nudges) pauses. Goal follow-ups (the user's own stated
+  // intention) and day-of birthday alerts are ordinary factual tasks and
+  // keep flowing — the person isn't paused. Fails OPEN until the WS-C
+  // column exists (by design).
+  const suppressPromo = await isInSuppressionWindow(user.id);
+  if (suppressPromo) logger.info(`dailySweeps: playful layer suppressed for user ${user.id} (safety spec §6 window)`);
+
   const cand = await gatherNudgeCandidates(user, now);
-  const nudge = selectNudge(user, cand, now);
+  const nudge = selectNudge(user, cand, now, { suppressPromo });
   if (!nudge) return; // nothing earned a nudge — silence is the right call
 
   // Create the nudge row first (this is what the weekly budget counts).

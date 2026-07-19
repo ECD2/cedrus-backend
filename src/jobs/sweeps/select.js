@@ -10,7 +10,11 @@ const PERSON_COOLDOWN_DAYS = 7;         // don't nudge about the same person too
 // TYPE gate (matches the cadence design):
 //   free  → goal follow-ups + day-of birthdays, core-five only (unmissable + their own intentions)
 //   pro   → all of the above + mid-week drift, across everyone
-export function selectNudge(user, cand, now = new Date()) {
+//
+// suppressPromo (safety spec §6): inside the 48h post-crisis window the playful
+// proactive layer — drift nudges — is withheld. Goal follow-ups and day-of
+// birthdays are ordinary factual tasks and continue (the person isn't paused).
+export function selectNudge(user, cand, now = new Date(), { suppressPromo = false } = {}) {
   const tier = planTier(user);
   const proLike = tier === 'pro' || tier === 'trial';
   const ctx = cand.context || [];
@@ -50,7 +54,8 @@ export function selectNudge(user, cand, now = new Date()) {
   }
 
   // Drift (PRO/trial only — real-time drift is a Pro capability) — gentle alert.
-  if (proLike) {
+  // Withheld during the §6 suppression window (the playful proactive layer).
+  if (proLike && !suppressPromo) {
     for (const p of ctx) {
       if (p.is_self || !p.proactive_enabled) continue;
       if (p.relationship_health_score == null || p.relationship_health_score >= HEALTH_DRIFT) continue;

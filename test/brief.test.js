@@ -24,6 +24,18 @@
   check('markSent was NOT called', __calls.indexOf('markSent') === -1, __calls.join(','));
   check('brief still generated (never silently marked sent)', __db.briefs[0].status === 'generated');
 
+  println('brief: the job consults the §6 suppression window and threads the flag');
+  __db.briefs = []; __calls.length = 0; __sendMode = 'ok'; __suppressionActive = false; __selectOpts = null;
+  await sendBriefTo(user, new Date('2030-01-01T00:00:00Z'));
+  check('suppression window consulted', __calls.indexOf('isInSuppressionWindow') >= 0, __calls.join(','));
+  check('flag false outside the window', __selectOpts && __selectOpts.suppressPromo === false, JSON.stringify(__selectOpts));
+
+  __db.briefs = []; __calls.length = 0; __suppressionActive = true; __selectOpts = null;
+  await sendBriefTo(user, new Date('2030-01-01T00:00:00Z'));
+  check('flag true inside the window', __selectOpts && __selectOpts.suppressPromo === true, JSON.stringify(__selectOpts));
+  check('brief STILL sends inside the window (person not paused)', __calls.indexOf('sendSms') >= 0 && __db.briefs[0].status === 'sent');
+  __suppressionActive = false;
+
   println('');
   const f = done();
   println(f === 0 ? 'ALL TESTS PASSED' : f + ' TEST(S) FAILED');

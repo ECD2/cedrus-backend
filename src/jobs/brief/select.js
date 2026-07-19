@@ -10,9 +10,15 @@ const MAX_MOMENTS = 3;            // keep the brief tight; curation > completene
 
 // Turn raw candidates into a ranked, gated brief PLAN. This is where the free/Pro
 // boundary lives, and where we decide the few things worth surfacing.
-export function selectBriefItems(user, candidates) {
+//
+// suppressPromo (safety spec §6): inside the 48h post-crisis window the
+// promotional/playful layer is withheld — the Pro-locked teaser (an upsell) and
+// the playful action offers. Factual moments, the goal aside, the self note and
+// the closing question are ordinary brief content and keep flowing.
+export function selectBriefItems(user, candidates, { suppressPromo = false } = {}) {
   const tier = planTier(user);
   const proLike = tier === 'pro' || tier === 'trial';
+  const offerActions = proLike && !suppressPromo;
 
   const ctx = candidates.context || [];
   const byId = new Map(ctx.map(p => [p.person_id, p]));
@@ -32,7 +38,7 @@ export function selectBriefItems(user, candidates) {
     moments.push({
       type: 'birthday', personId: b.id, personName: b.name,
       detail: d === 0 ? 'birthday is today' : d === 1 ? 'birthday is tomorrow' : `birthday in ${d} days`,
-      priority: d <= 3 ? 100 : 85, actionOffer: proLike,
+      priority: d <= 3 ? 100 : 85, actionOffer: offerActions,
     });
   }
 
@@ -43,7 +49,7 @@ export function selectBriefItems(user, candidates) {
     moments.push({
       type: 'drift', personId: p.person_id, personName: p.name,
       detail: weeks ? `haven't talked in about ${weeks} week${weeks > 1 ? 's' : ''}` : 'starting to slip',
-      priority: p.relationship_health_score < HEALTH_URGENT ? 78 : 62, actionOffer: proLike,
+      priority: p.relationship_health_score < HEALTH_URGENT ? 78 : 62, actionOffer: offerActions,
     });
   }
 
@@ -53,7 +59,7 @@ export function selectBriefItems(user, candidates) {
     if (!le) continue;
     moments.push({
       type: 'life_event', personId: p.person_id, personName: p.name,
-      detail: le, priority: 66, actionOffer: proLike,
+      detail: le, priority: 66, actionOffer: offerActions,
     });
   }
 
@@ -63,7 +69,7 @@ export function selectBriefItems(user, candidates) {
     if (!si) continue;
     moments.push({
       type: 'saved_item', personId: p.person_id, personName: p.name,
-      detail: si, priority: 56, actionOffer: proLike,
+      detail: si, priority: 56, actionOffer: offerActions,
     });
   }
 
@@ -75,8 +81,9 @@ export function selectBriefItems(user, candidates) {
   const goalFollowup = buildGoalFollowup(candidates.openGoals, byId);
 
   // Free-tier teaser: people OUTSIDE the circle who are slipping (loss-aversion engine).
+  // It is an upsell — suppressed outright inside the §6 window.
   let teaser = null;
-  if (!proLike) {
+  if (!proLike && !suppressPromo) {
     const slippingIds = new Set();
     const names = [];
     for (const p of outside) {
