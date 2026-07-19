@@ -42,6 +42,16 @@ export const config = {
   // When true, the brief job composes + records but LOGS instead of sending via Twilio.
   // Lets you tune the brief before A2P registration completes.
   briefDryRun: process.env.BRIEF_DRY_RUN === 'true',
+
+  // WS-F email brief (MOUNT_N2 §2). The job (src/jobs/briefEmail.js) takes an
+  // injectable env object and reads process.env itself; these fields carry only
+  // presence/mode so assertSecureBoot() can fail closed without secrets being
+  // copied around. Full var table: docs/MOUNT_N2.md.
+  briefEmailEnabled: process.env.BRIEF_EMAIL_ENABLED === 'true',
+  briefEmailTransport: process.env.BRIEF_EMAIL_TRANSPORT || 'mock',
+  briefEmailLive: process.env.BRIEF_EMAIL_LIVE === 'true',
+  briefEmailLinkSecretSet: Boolean(process.env.BRIEF_EMAIL_LINK_SECRET),
+  briefEmailSendgridKeySet: Boolean(process.env.BRIEF_EMAIL_SENDGRID_KEY),
 };
 
 // ── Fail-closed boot checks for security-relevant config (items 4, A2/A12) ──
@@ -65,6 +75,22 @@ export function assertSecureBoot() {
       'derived from the Host header (spoofable).';
     if (isProduction) problems.push(msg);
     else console.warn(`WARN: ${msg} (allowed in ${nodeEnv}; will fail closed in production)`);
+  }
+
+  // MOUNT_N2 §2: the email brief must never run without working unsubscribe
+  // links, and live sending must be an explicit, fully-specified choice. The
+  // job also fails closed at runtime; this makes a misconfigured deploy die
+  // loudly at boot instead of silently skipping sends.
+  if (isProduction && config.briefEmailEnabled && !config.briefEmailLinkSecretSet) {
+    problems.push(
+      'BRIEF_EMAIL_ENABLED=true requires BRIEF_EMAIL_LINK_SECRET: unsubscribe links are a compliance ' +
+      'requirement, not an optional extra. Set the secret or disable the email brief.');
+  }
+  if (isProduction && config.briefEmailLive &&
+      (config.briefEmailTransport !== 'sendgrid' || !config.briefEmailSendgridKeySet)) {
+    problems.push(
+      'BRIEF_EMAIL_LIVE=true requires BRIEF_EMAIL_TRANSPORT=sendgrid and BRIEF_EMAIL_SENDGRID_KEY. ' +
+      'Live email must be switched on explicitly and completely, or not at all.');
   }
 
   if (problems.length) {

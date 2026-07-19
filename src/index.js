@@ -5,6 +5,8 @@ import smsRouter from './routes/sms.js';
 import statusRouter from './routes/deliveryStatus.js';
 import healthRouter from './routes/health.js';
 import adminRouter from './routes/admin.js';
+import adminPanelRouter from './routes/adminPanel.js';
+import apiRouter from './routes/api/index.js';
 import { startScheduler } from './jobs/scheduler.js';
 
 // Item 4/A12: refuse to boot in an insecure production configuration
@@ -20,7 +22,9 @@ app.use(express.json({ limit: '100kb' }));
 app.use('/health', healthRouter);
 app.use('/sms', smsRouter);      // POST /sms/inbound
 app.use('/sms', statusRouter);   // POST /sms/status  (Twilio delivery callbacks, item 8)
+app.use('/admin', adminPanelRouter); // N1 panel — must precede adminRouter (MOUNT_N1)
 app.use('/admin', adminRouter);
+app.use('/api', apiRouter);      // N3: web capture, priority swap, restore (MOUNT_N3)
 
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {

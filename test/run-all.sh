@@ -30,3 +30,19 @@ $RUNNER test/search.test.mjs
 
 echo ""
 echo "ALL WS-B SUITES PASSED"
+
+echo ""
+echo "=== N1 — admin panel ==="
+sh test/run-admin-tests.sh
+
+echo ""
+echo "=== N3 — web API (capture / priority / restore) ==="
+# bun explicitly, not $RUNNER: the suite uses bun's mock.module (MOUNT_N3).
+bun test/web-api.test.mjs
+
+echo ""
+echo "=== WS-F — weekly-note email backend ==="
+sh test/run-n2-brief-email.sh
+
+echo ""
+echo "ALL BATTERY SUITES PASSED"
