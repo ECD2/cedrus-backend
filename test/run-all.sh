@@ -63,4 +63,8 @@ echo "=== NF2 — chat memory import (MOUNT_IMPORT) ==="
 sh test/run-import-tests.sh
 
 echo ""
+echo "=== NF2 — interests API (CRUD / auth / opt-out) ==="
+bun test/interests.test.mjs
+
+echo ""
 echo "ALL BATTERY SUITES PASSED"
