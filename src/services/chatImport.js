@@ -6,7 +6,7 @@ import { understand } from '../pipeline/05_understand.js';
 import { isTautologicalFact } from '../pipeline/07_persist.js';
 import * as people from './people.js';
 import * as usage from './usage.js';
-import { canonicalFactKey } from './memory.js';
+import { canonicalFactKey, SINGLE_VALUED_KEYS } from './memory.js';
 import { sanitizeSearchResults } from './search.js';
 import { parseChatExport, ImportParseError } from '../parsers/chatExport.js';
 import { classifyFactTheme, containsSecret, scoreMessage, MIN_SCORE } from './importScope.js';
@@ -54,8 +54,9 @@ import { createImportStore } from './importJobs.js';
 //     memory.addFact() (which can't take a source without an edit) — same
 //     canonicalFactKey(), but NO supersession: a historical import must
 //     never retire a fact the user told Cedrus directly. Single-valued keys
-//     (relationship/job/city) are skipped entirely when a current value
-//     exists; historical never clobbers present.
+//     (memory.SINGLE_VALUED_KEYS — the one shared registry, not a local copy)
+//     are skipped entirely when a current value exists; historical never
+//     clobbers present.
 //   • consent_events can't record import_confirmed (CHECK constraint allows
 //     four SMS event types only) — audit rides the structured log stream,
 //     agent_runs, and the anchor message row instead.
@@ -550,7 +551,6 @@ export async function confirmImport({ user, importId, accept }, deps = {}) {
     // Existing current facts, re-fetched at commit time: the idempotency and
     // the historical-never-clobbers-present rules both key off this.
     const owned = new Set((await d.listForUser(user.id)).map((p) => p.id));
-    const SINGLE_VALUED = new Set(['relationship', 'job', 'city', 'mood']);
     const results = { people_created: 0, people_matched: 0, facts_saved: 0, facts_skipped: 0 };
 
     for (const { g, facts } of chosen) {
@@ -597,7 +597,7 @@ export async function confirmImport({ user, importId, accept }, deps = {}) {
         // Historical never clobbers present: single-valued keys are only
         // written when the person has NO current value for that key. Never
         // superseded from an import.
-        if (SINGLE_VALUED.has(f.fact_key) && values && values.size && !isNew) {
+        if (SINGLE_VALUED_KEYS.has(f.fact_key) && values && values.size && !isNew) {
           results.facts_skipped += 1; continue;
         }
         const { error } = await d.db.from('facts').insert({

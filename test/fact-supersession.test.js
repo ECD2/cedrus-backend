@@ -194,6 +194,45 @@
   check('no person link written on suppressed turn', __calls.linkMessagePerson.length === 0);
   check('no relationship column touched on suppressed turn', personRow('p1').relationship === 'girlfriend');
 
+  // ── Registry is the SINGLE source of truth + safe to extend ───────────────
+  // Locks in the modularity guarantee: the canonical slot set lives in one
+  // exported place (memory.js), and the import path imports SINGLE_VALUED_KEYS
+  // from here instead of keeping its own copy — so extending the registry can't
+  // silently leave a write path behind and re-fork a slot.
+  println('canonical slot registry is single-sourced and extension-safe');
+  check('SINGLE_VALUED_KEYS is exported and holds the relationship slot',
+    typeof SINGLE_VALUED_KEYS !== 'undefined' && SINGLE_VALUED_KEYS.has('relationship'));
+  check('registry covers relationship/job/city/mood',
+    ['relationship', 'job', 'city', 'mood'].every((k) => SINGLE_VALUED_KEYS.has(k)));
+  // Every alias must fold onto a SINGLE-VALUED canonical slot — that pairing is
+  // what makes a correction under any alias supersede instead of stack. Add a
+  // new alias pointing at a multi-valued slot and this fails loudly.
+  const aliasEntries = Object.entries(FACT_KEY_ALIASES);
+  check('every alias canonicalizes to its declared target',
+    aliasEntries.every(([alias, canon]) => canonicalFactKey(alias) === canon));
+  check('every aliased slot is single-valued (any-alias corrections supersede)',
+    aliasEntries.every(([, canon]) => SINGLE_VALUED_KEYS.has(canon)));
+
+  // ── Freshly written facts are explicitly current (invariant self-contained) ─
+  println('addFact writes is_current = true (not resting on a column default)');
+  __db.facts.length = 0;
+  await addFact({ userId: 'u1', personId: 'pX', factType: 'context', factKey: 'city', factValue: 'Lisbon', supersedesPrior: false, sourceMessageId: 'mX', confidence: 0.9 });
+  const fresh = __db.facts.filter((f) => f.person_id === 'pX' && f.fact_key === 'city');
+  check('the inserted fact carries is_current === true', fresh.length === 1 && fresh[0].is_current === true);
+
+  // ── girlfriend → ex under EVERY relationship alias ends with ONE fact ─────
+  // Drives the exact production bug once per alias key, proving the collapse
+  // holds no matter which alias the model emits the correction under.
+  println('girlfriend -> ex under each relationship alias ends with exactly one fact');
+  for (const alias of ['relationship_status', 'relationship_type', 'relationship_to_user']) {
+    __db.facts.length = 0;
+    __db.facts.push({ id: 900, user_id: 'u1', person_id: 'pr', fact_type: 'relationship_detail', fact_key: 'relationship', fact_value: 'girlfriend', is_current: true });
+    await addFact({ userId: 'u1', personId: 'pr', factType: 'relationship_detail', factKey: alias, factValue: 'ex-girlfriend', supersedesPrior: false, sourceMessageId: 'm', confidence: 0.9 });
+    const rel = currentFacts('pr', ['relationship', 'relationship_status', 'relationship_type', 'relationship_to_user']);
+    check('exactly one current relationship fact after correction via ' + alias,
+      rel.length === 1 && rel[0].fact_value === 'ex-girlfriend' && rel[0].fact_key === 'relationship', 'got ' + rel.length);
+  }
+
   println('');
   println(failures === 0 ? 'ALL TESTS PASSED' : failures + ' TEST(S) FAILED');
   if (failures > 0 && typeof process !== 'undefined') process.exit(1);

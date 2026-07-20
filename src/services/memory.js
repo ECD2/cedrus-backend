@@ -1,11 +1,26 @@
 import { supabase } from '../lib/supabase.js';
 import { mondayOf, localWeekOf } from '../utils/time.js';
 
-// One canonical key per real-world attribute. The prompt instructs the model to
-// emit these; stragglers are normalized here so the same attribute can never
-// fork into two keys (the "relationship" vs "relationship_status" bug that left
-// a girlfriend and an ex-girlfriend both current on one person).
-const FACT_KEY_ALIASES = {
+// ─────────────────────────────────────────────────────────────────────────────
+// CANONICAL FACT-SLOT REGISTRY — the single source of truth for "which fact keys
+// describe the same real-world attribute." This is the ONE place slots are
+// defined; every write path reconciles through it and NOTHING keeps its own
+// copy: extraction + user corrections go through addFact() below, and the
+// historical chat-import path imports SINGLE_VALUED_KEYS straight from here.
+// Reconciliation must never be scattered, so the extension surface is exactly
+// these two tables:
+//
+//   • To alias a key onto an existing slot: add `<alias>: '<canonical>'` to
+//     FACT_KEY_ALIASES. canonicalFactKey() then folds the alias in everywhere.
+//   • To make a slot single-valued (a new value retires the old one): add the
+//     canonical key to SINGLE_VALUED_KEYS.
+//
+// Why it exists: without it the same attribute forks into two keys — the
+// "relationship" vs "relationship_status" bug that left a girlfriend and an
+// ex-girlfriend both current on one person. Split rows written before this
+// registry landed are collapsed by docs/REL_STATUS_RECONCILE.proposed.sql; the
+// on-write guarantee is proven in test/fact-supersession.test.js.
+export const FACT_KEY_ALIASES = {
   relationship_status: 'relationship',
   relationship_type: 'relationship',
   relationship_to_user: 'relationship',
@@ -16,9 +31,10 @@ const FACT_KEY_ALIASES = {
   career: 'job',
 };
 
-// Attributes that can only have one current value per person. A new value always
-// retires the old row, even when the model forgets to flag supersedes_prior.
-const SINGLE_VALUED_KEYS = new Set(['relationship', 'job', 'city', 'mood']);
+// Canonical slots that hold exactly ONE current value per person: a new value
+// always retires the prior row (latest stated value supersedes), even when the
+// model forgets to flag supersedes_prior.
+export const SINGLE_VALUED_KEYS = new Set(['relationship', 'job', 'city', 'mood']);
 
 export function canonicalFactKey(key) {
   if (!key) return null;
@@ -40,6 +56,10 @@ export async function addFact({ userId, personId, factType, factKey, factValue, 
   const { error } = await supabase.from('facts').insert({
     user_id: userId, person_id: personId, fact_type: factType, fact_key: key,
     fact_value: factValue, source_message_id: sourceMessageId, confidence,
+    // The value we just wrote IS the current one. Stated explicitly so the
+    // "exactly one current value per slot" invariant holds here on its own,
+    // never resting on the facts.is_current column default.
+    is_current: true,
   });
   if (error) throw error;
 }
