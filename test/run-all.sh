@@ -45,4 +45,13 @@ echo "=== WS-F — weekly-note email backend ==="
 sh test/run-n2-brief-email.sh
 
 echo ""
+echo "=== admin auth — TOTP login + sessions (MOUNT_ADMIN_AUTH) ==="
+sh test/run-admin-auth-tests.sh
+
+echo ""
+echo "=== web onboarding (public /api/onboard/start, MOUNT_WEBONBOARD) ==="
+# bun explicitly, not $RUNNER: the suite uses bun's mock.module.
+bun test/webonboard.test.mjs
+
+echo ""
 echo "ALL BATTERY SUITES PASSED"

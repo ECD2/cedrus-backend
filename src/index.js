@@ -6,7 +6,9 @@ import statusRouter from './routes/deliveryStatus.js';
 import healthRouter from './routes/health.js';
 import adminRouter from './routes/admin.js';
 import adminPanelRouter from './routes/adminPanel.js';
+import { adminAuthRouter, adminSessionAdapter } from './routes/adminAuth.js';
 import apiRouter from './routes/api/index.js';
+import onboardRouter from './routes/api/onboard.js';
 import { startScheduler } from './jobs/scheduler.js';
 
 // Item 4/A12: refuse to boot in an insecure production configuration
@@ -14,6 +16,9 @@ import { startScheduler } from './jobs/scheduler.js';
 assertSecureBoot();
 
 const app = express();
+// Railway terminates TLS at its proxy; trust one hop so req.ip is the real
+// client (the onboarding rate limiter keys on it — MOUNT_WEBONBOARD).
+app.set('trust proxy', 1);
 // Twilio posts application/x-www-form-urlencoded; JSON is for future web/Stripe
 // webhooks. A2/A7: cap body size so a large POST can't be a cheap memory lever.
 app.use(express.urlencoded({ extended: false, limit: '100kb' }));
@@ -22,8 +27,11 @@ app.use(express.json({ limit: '100kb' }));
 app.use('/health', healthRouter);
 app.use('/sms', smsRouter);      // POST /sms/inbound
 app.use('/sms', statusRouter);   // POST /sms/status  (Twilio delivery callbacks, item 8)
+app.use('/admin', adminAuthRouter);     // MOUNT_ADMIN_AUTH: POST /admin/auth/login, /admin/auth/enroll
+app.use('/admin', adminSessionAdapter); // MOUNT_ADMIN_AUTH: Bearer session → req.adminSession + injected x-admin-key
 app.use('/admin', adminPanelRouter); // N1 panel — must precede adminRouter (MOUNT_N1)
 app.use('/admin', adminRouter);
+app.use('/api/onboard', onboardRouter); // PUBLIC website onboarding — must precede the authed /api router (MOUNT_WEBONBOARD)
 app.use('/api', apiRouter);      // N3: web capture, priority swap, restore (MOUNT_N3)
 
 // eslint-disable-next-line no-unused-vars
