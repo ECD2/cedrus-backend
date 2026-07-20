@@ -32,6 +32,11 @@ echo ""
 echo "ALL WS-B SUITES PASSED"
 
 echo ""
+echo "=== CORS — browser cross-origin access (cedrus.life) ==="
+# bun explicitly: the suite drives a real Express app over node:http.
+bun test/cors.test.mjs
+
+echo ""
 echo "=== N1 — admin panel ==="
 sh test/run-admin-tests.sh
 

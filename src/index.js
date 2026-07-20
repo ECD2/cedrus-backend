@@ -9,6 +9,7 @@ import adminPanelRouter from './routes/adminPanel.js';
 import { adminAuthRouter, adminSessionAdapter } from './routes/adminAuth.js';
 import apiRouter from './routes/api/index.js';
 import onboardRouter from './routes/api/onboard.js';
+import { corsMiddleware } from './lib/cors.js';
 import { startScheduler } from './jobs/scheduler.js';
 
 // Item 4/A12: refuse to boot in an insecure production configuration
@@ -19,6 +20,12 @@ const app = express();
 // Railway terminates TLS at its proxy; trust one hop so req.ip is the real
 // client (the onboarding rate limiter keys on it — MOUNT_WEBONBOARD).
 app.set('trust proxy', 1);
+// Browser clients (cedrus.life) call this API cross-origin, so CORS preflight
+// must be answered and the allowed origin echoed BEFORE the body parsers and
+// routers run. Pinned to our origins — never "*". There is no Stripe raw-body
+// webhook to precede this yet; if one is added, mount its express.raw route
+// ahead of this line so signature verification sees the untouched body.
+app.use(corsMiddleware);
 // Twilio posts application/x-www-form-urlencoded; JSON is for future web/Stripe
 // webhooks. A2/A7: cap body size so a large POST can't be a cheap memory lever.
 app.use(express.urlencoded({ extended: false, limit: '100kb' }));
