@@ -59,4 +59,8 @@ echo "=== web onboarding (public /api/onboard/start, MOUNT_WEBONBOARD) ==="
 bun test/webonboard.test.mjs
 
 echo ""
+echo "=== NF2 — chat memory import (MOUNT_IMPORT) ==="
+sh test/run-import-tests.sh
+
+echo ""
 echo "ALL BATTERY SUITES PASSED"

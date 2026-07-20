@@ -9,6 +9,7 @@ import adminPanelRouter from './routes/adminPanel.js';
 import { adminAuthRouter, adminSessionAdapter } from './routes/adminAuth.js';
 import apiRouter from './routes/api/index.js';
 import onboardRouter from './routes/api/onboard.js';
+import importRouter from './routes/api/importRoutes.js';
 import { corsMiddleware } from './lib/cors.js';
 import { startScheduler } from './jobs/scheduler.js';
 
@@ -39,6 +40,7 @@ app.use('/admin', adminSessionAdapter); // MOUNT_ADMIN_AUTH: Bearer session → 
 app.use('/admin', adminPanelRouter); // N1 panel — must precede adminRouter (MOUNT_N1)
 app.use('/admin', adminRouter);
 app.use('/api/onboard', onboardRouter); // PUBLIC website onboarding — must precede the authed /api router (MOUNT_WEBONBOARD)
+app.use('/api/import', importRouter);   // NF2-IMPORT: chat-memory import (JWT, raw upload) — MUST precede the authed /api router (MOUNT_IMPORT)
 app.use('/api', apiRouter);      // N3: web capture, priority swap, restore (MOUNT_N3)
 
 // eslint-disable-next-line no-unused-vars
