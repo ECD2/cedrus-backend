@@ -21,6 +21,11 @@ import { panelTokenConfigured, panelTokenMatches, listUsers, userHealth, userBil
 const panel = Router();
 
 function requirePanelAuth(req, res, next) {
+  // A valid admin session (set by adminSessionAdapter — docs/MOUNT_ADMIN_AUTH.md)
+  // is strictly stronger than the shared header token, so accept it directly.
+  // This also covers ADMIN_PANEL_TOKEN differing from ADMIN_KEY, which the
+  // adapter's injected x-admin-key alone could not satisfy.
+  if (req.adminSession) return next();
   if (!panelTokenConfigured()) {
     logger.event('admin_panel.auth.rejected', {
       level: 'warn', error_category: 'auth', status_code: 404,
