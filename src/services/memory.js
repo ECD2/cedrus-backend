@@ -20,15 +20,37 @@ import { mondayOf, localWeekOf } from '../utils/time.js';
 // ex-girlfriend both current on one person. Split rows written before this
 // registry landed are collapsed by docs/REL_STATUS_RECONCILE.proposed.sql; the
 // on-write guarantee is proven in test/fact-supersession.test.js.
+// INVARIANT (locked by test/fact-supersession.test.js): every alias here MUST
+// canonicalize to its declared target AND that target MUST be single-valued
+// (below). That pairing is what makes a correction arriving under ANY alias
+// supersede the prior value instead of forking a second current row. So only
+// ever alias onto relationship / job / city (never a multi-valued slot like
+// music). New alias keys are written in canonical underscore form; canonicalFactKey
+// folds spaces/hyphens/underscore-runs so the model can slip on separators too.
 export const FACT_KEY_ALIASES = {
+  // → relationship (what the person IS to the user; one at a time). The
+  // extraction prompt names relationship_status / relationship_type / "status"
+  // as the forbidden variants — all three fold here (status was the gap).
   relationship_status: 'relationship',
   relationship_type: 'relationship',
   relationship_to_user: 'relationship',
+  relationship_to_me: 'relationship',
+  status: 'relationship',
+  // → city (where they are now). location/home already folded; add the other
+  // plain "where they live" phrasings the model reaches for.
   location: 'city',
   home: 'city',
+  lives_in: 'city',
+  residence: 'city',
+  // → job (their work — both the employer facet and the field facet already
+  // collapse here via employer + career, so these synonyms are consistent).
   work: 'job',
   employer: 'job',
   career: 'job',
+  occupation: 'job',
+  profession: 'job',
+  workplace: 'job',
+  company: 'job',
 };
 
 // Canonical slots that hold exactly ONE current value per person: a new value
@@ -36,9 +58,15 @@ export const FACT_KEY_ALIASES = {
 // model forgets to flag supersedes_prior.
 export const SINGLE_VALUED_KEYS = new Set(['relationship', 'job', 'city', 'mood']);
 
+// Fold a raw fact_key to its canonical slot. Normalizes case, surrounding
+// whitespace, and ANY run of separators (spaces, hyphens, underscores) to a
+// single underscore, so "Relationship Status", "relationship-status" and
+// "relationship_status" all reach the same alias entry before the lookup. A key
+// that normalizes to empty is treated as no key.
 export function canonicalFactKey(key) {
   if (!key) return null;
-  const k = String(key).trim().toLowerCase().replace(/\s+/g, '_');
+  const k = String(key).trim().toLowerCase().replace(/[\s_-]+/g, '_').replace(/^_+|_+$/g, '');
+  if (!k) return null;
   return FACT_KEY_ALIASES[k] || k;
 }
 

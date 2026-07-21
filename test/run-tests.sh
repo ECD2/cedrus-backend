@@ -91,4 +91,8 @@ run_js "$(bundle test/reliability-core.js src/jobs/brief/select.js test/brief-su
 section "sweep §6 suppression"
 run_js "$(bundle test/reliability-core.js src/jobs/sweeps/select.js test/sweep-suppression.test.js)"
 
+# ── Bundle 10: insight engine — pure ranking core + read-layer wiring ───────
+section "insight engine"
+run_js "$(bundle test/reliability-core.js src/services/insights.js test/insights.test.js)"
+
 printf '\n✅ All test bundles passed.\n'

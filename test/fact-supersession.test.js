@@ -233,6 +233,39 @@
       rel.length === 1 && rel[0].fact_value === 'ex-girlfriend' && rel[0].fact_key === 'relationship', 'got ' + rel.length);
   }
 
+  // ── PART A hardening: extended registry (new aliases + separator folding) ──
+  println('extended registry: new single-valued aliases fold onto their slot');
+  check('status -> relationship (the prompt-named 3rd variant that was the gap)', canonicalFactKey('status') === 'relationship');
+  check('relationship_to_me -> relationship', canonicalFactKey('relationship_to_me') === 'relationship');
+  check('occupation -> job', canonicalFactKey('occupation') === 'job');
+  check('profession -> job', canonicalFactKey('profession') === 'job');
+  check('workplace -> job', canonicalFactKey('workplace') === 'job');
+  check('company -> job', canonicalFactKey('company') === 'job');
+  check('lives_in -> city', canonicalFactKey('lives_in') === 'city');
+  check('residence -> city', canonicalFactKey('residence') === 'city');
+
+  println('separator folding: hyphens and underscore-runs normalize like spaces');
+  check('hyphen folds: relationship-status -> relationship', canonicalFactKey('relationship-status') === 'relationship');
+  check('double underscore folds: relationship__status -> relationship', canonicalFactKey('relationship__status') === 'relationship');
+  check('spaced + capitalized: " Lives In " -> city', canonicalFactKey(' Lives In ') === 'city');
+  // Complementary facet stays distinct (audit D2): job_title must NOT collapse onto job.
+  check('Job-Title stays job_title (not aliased onto job)', canonicalFactKey('Job-Title') === 'job_title');
+  check('separator-only key normalizes to null', canonicalFactKey(' - _ ') === null);
+
+  println('correction via a NEW alias supersedes instead of forking (through addFact)');
+  for (const [alias, seedKey, seedVal, newVal] of [
+    ['status', 'relationship', 'girlfriend', 'ex-girlfriend'],
+    ['occupation', 'job', 'Stripe', 'Google'],
+    ['lives_in', 'city', 'Austin', 'Chicago'],
+  ]) {
+    __db.facts.length = 0;
+    __db.facts.push({ id: 950, user_id: 'u1', person_id: 'pn', fact_type: 'context', fact_key: seedKey, fact_value: seedVal, is_current: true });
+    await addFact({ userId: 'u1', personId: 'pn', factType: 'context', factKey: alias, factValue: newVal, supersedesPrior: false, sourceMessageId: 'm', confidence: 0.9 });
+    const rows = currentFacts('pn', [seedKey, alias]);
+    check('one current ' + seedKey + ' fact after correction via ' + alias,
+      rows.length === 1 && rows[0].fact_value === newVal && rows[0].fact_key === seedKey, 'got ' + rows.length);
+  }
+
   println('');
   println(failures === 0 ? 'ALL TESTS PASSED' : failures + ' TEST(S) FAILED');
   if (failures > 0 && typeof process !== 'undefined') process.exit(1);

@@ -18,12 +18,17 @@
 -- Canonical registry (MUST mirror src/services/memory.js — the single source
 -- of truth). If you extend FACT_KEY_ALIASES / SINGLE_VALUED_KEYS in code, mirror
 -- the change in the two CASE blocks and the single-valued list below.
---   ALIASES  -> canonical:
---     relationship_status, relationship_type, relationship_to_user -> relationship
---     location, home                                               -> city
---     work, employer, career                                       -> job
+--   ALIASES  -> canonical (kept in lockstep with FACT_KEY_ALIASES in code):
+--     relationship_status, relationship_type, relationship_to_user,
+--     relationship_to_me, status                                   -> relationship
+--     location, home, lives_in, residence                          -> city
+--     work, employer, career, occupation, profession, workplace,
+--     company                                                      -> job
 --   SINGLE-VALUED canonical slots (one current value per person):
 --     relationship, job, city, mood
+--   NOTE: 'status' is the one mildly generic alias — the extraction prompt uses
+--   it ONLY for relationship, but eyeball the section-0 pre-flight before running
+--   in case a legacy row filed something else under 'status'.
 --
 -- Safety / operating notes
 --   * DO NOT RUN AS PART OF DEPLOY. Emil runs all migrations through the
@@ -53,11 +58,19 @@
 --       WHEN 'relationship_status'  THEN 'relationship'
 --       WHEN 'relationship_type'    THEN 'relationship'
 --       WHEN 'relationship_to_user' THEN 'relationship'
---       WHEN 'location' THEN 'city'
---       WHEN 'home'     THEN 'city'
---       WHEN 'work'     THEN 'job'
---       WHEN 'employer' THEN 'job'
---       WHEN 'career'   THEN 'job'
+--       WHEN 'relationship_to_me'   THEN 'relationship'
+--       WHEN 'status'               THEN 'relationship'
+--       WHEN 'location'   THEN 'city'
+--       WHEN 'home'       THEN 'city'
+--       WHEN 'lives_in'   THEN 'city'
+--       WHEN 'residence'  THEN 'city'
+--       WHEN 'work'       THEN 'job'
+--       WHEN 'employer'   THEN 'job'
+--       WHEN 'career'     THEN 'job'
+--       WHEN 'occupation' THEN 'job'
+--       WHEN 'profession' THEN 'job'
+--       WHEN 'workplace'  THEN 'job'
+--       WHEN 'company'    THEN 'job'
 --       ELSE lower(btrim(fact_key))
 --     END AS canonical_key
 --   FROM facts
@@ -90,11 +103,19 @@ WITH canon AS (
       WHEN 'relationship_status'  THEN 'relationship'
       WHEN 'relationship_type'    THEN 'relationship'
       WHEN 'relationship_to_user' THEN 'relationship'
-      WHEN 'location' THEN 'city'
-      WHEN 'home'     THEN 'city'
-      WHEN 'work'     THEN 'job'
-      WHEN 'employer' THEN 'job'
-      WHEN 'career'   THEN 'job'
+      WHEN 'relationship_to_me'   THEN 'relationship'
+      WHEN 'status'               THEN 'relationship'
+      WHEN 'location'   THEN 'city'
+      WHEN 'home'       THEN 'city'
+      WHEN 'lives_in'   THEN 'city'
+      WHEN 'residence'  THEN 'city'
+      WHEN 'work'       THEN 'job'
+      WHEN 'employer'   THEN 'job'
+      WHEN 'career'     THEN 'job'
+      WHEN 'occupation' THEN 'job'
+      WHEN 'profession' THEN 'job'
+      WHEN 'workplace'  THEN 'job'
+      WHEN 'company'    THEN 'job'
       ELSE lower(btrim(fact_key))
     END AS canonical_key
   FROM facts
@@ -129,17 +150,27 @@ SET fact_key = CASE lower(btrim(fact_key))
       WHEN 'relationship_status'  THEN 'relationship'
       WHEN 'relationship_type'    THEN 'relationship'
       WHEN 'relationship_to_user' THEN 'relationship'
-      WHEN 'location' THEN 'city'
-      WHEN 'home'     THEN 'city'
-      WHEN 'work'     THEN 'job'
-      WHEN 'employer' THEN 'job'
-      WHEN 'career'   THEN 'job'
+      WHEN 'relationship_to_me'   THEN 'relationship'
+      WHEN 'status'               THEN 'relationship'
+      WHEN 'location'   THEN 'city'
+      WHEN 'home'       THEN 'city'
+      WHEN 'lives_in'   THEN 'city'
+      WHEN 'residence'  THEN 'city'
+      WHEN 'work'       THEN 'job'
+      WHEN 'employer'   THEN 'job'
+      WHEN 'career'     THEN 'job'
+      WHEN 'occupation' THEN 'job'
+      WHEN 'profession' THEN 'job'
+      WHEN 'workplace'  THEN 'job'
+      WHEN 'company'    THEN 'job'
       ELSE fact_key
     END
 WHERE is_current = true
   AND lower(btrim(fact_key)) IN (
     'relationship_status', 'relationship_type', 'relationship_to_user',
-    'location', 'home', 'work', 'employer', 'career'
+    'relationship_to_me', 'status',
+    'location', 'home', 'lives_in', 'residence',
+    'work', 'employer', 'career', 'occupation', 'profession', 'workplace', 'company'
   );
 
 -- ----------------------------------------------------------------------------
