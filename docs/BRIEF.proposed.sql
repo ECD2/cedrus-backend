@@ -1,0 +1,42 @@
+-- ============================================================================
+-- BRIEF.proposed.sql   (PROPOSED — NOT EXECUTED, and NOT required)
+--
+-- Finding: the Brief Engine (src/services/briefEngine.js) needs NO structural
+-- schema change. It is READ + COMPOSE only and writes nothing. Every signal it
+-- ranks already exists and is read either by the Insight Engine
+-- (v_agent_person_context, people birthdays, saved_items.event_date,
+-- facts.created_at, reminders, pending_prompts, user_goals — see
+-- docs/INSIGHTS.proposed.sql) or by the existing gather (interests via the N5
+-- `interests` table). So there is nothing here the feature DEPENDS on, and this
+-- worktree ran nothing.
+--
+-- The single statement below is an OPTIONAL idempotency marker that a FUTURE
+-- send wiring would want — it is deliberately NOT needed by the current inert,
+-- queryable engine, which never dispatches. generateBrief / generateFirstBrief
+-- only RETURN a composed brief; they are not wired to SMS, email, or the
+-- scheduler. IF the first brief is later wired to actually send exactly once
+-- after onboarding (the onboarding payoff), a per-user marker gives that send
+-- path its idempotency lock, the same way the `briefs` row locks the weekly
+-- brief (see src/services/briefs.js hasBriefForWeek). Until then it is inert.
+--
+-- Safety / operating notes
+--   * DO NOT RUN AS PART OF DEPLOY. Emil runs all migrations through the
+--     Supabase ceremony. Committed for review only; this worktree ran nothing.
+--   * The safety §6 window column (app_users.crisis_suppressed_until) is a
+--     SEPARATE, already-flagged WS-C migration (docs/WSB_FLAGS_FOR_WSC.md). It
+--     is NOT proposed here; the brief engine reads it fail-open and never
+--     depends on it existing.
+--   * ADD COLUMN ... IF NOT EXISTS is idempotent. Confirm the target table name
+--     matches the live schema (app_users) before running; adjust if it differs.
+-- ============================================================================
+
+-- OPTIONAL (future send wiring only): first-brief idempotency marker.
+--   Set once, when/if the onboarding "first brief" is actually dispatched, so it
+--   can never be sent twice. The inert generateFirstBrief() does NOT read or
+--   write this; it exists purely to give a later send path an idempotency lock.
+ALTER TABLE app_users
+  ADD COLUMN IF NOT EXISTS first_brief_at timestamptz;
+
+-- No index is proposed: the marker is read/written per-user by primary key on a
+-- future send path, never scanned. The brief engine's reads add no new hot query
+-- beyond the two partial indexes already proposed in docs/INSIGHTS.proposed.sql.
