@@ -117,6 +117,8 @@
   check('excludes the self person from the greeting', first.sections.people.every((p) => p.id !== 'self') && first.sections.people.length === 2);
   check('surfaces a REAL insight (a birthday they entered)', first.text.includes("Ana's birthday is in 4 days."));
   check('reflects real interests', first.text.includes('Inter Miami') && first.text.includes('bouldering'));
+  check('a freshly-set goal reads forward-looking, not the weekly past tense',
+    /You set a goal to call my dad on Sundays/.test(first.text) && !/hope you got/i.test(first.text), first.text);
   check('does NOT invent a person who was never named', !first.text.includes('Zed') && !/reached out to/i.test(first.text));
   check('open-door question present', /\?$/.test(first.text.trim()) || first.text.includes('?'));
   check('first brief voice-safe', first.voice.ok === true, JSON.stringify(first.voice.violations));

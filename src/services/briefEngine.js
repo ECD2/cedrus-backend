@@ -265,7 +265,9 @@ export function buildFirstBrief(user, profile = {}, { insights = [], now = new D
     }
     if (goals.length) {
       sections.goals = goals.map((g) => ({ goalText: g.goal_text, personId: g.person_id || null }));
-      parts.push(goalAsideLine({ goalText: goals[0].goal_text, personName: null }));
+      // Forward-looking for a NEW user (the goal was just set), not the weekly
+      // recap's past tense. Never invents progress that has not happened yet.
+      parts.push(`You set a goal to ${clip(String(goals[0].goal_text || 'stay close'), 60)}, and I will help you keep it.`);
     }
     // open-door — invite the first real reach-out.
     parts.push(people.length
