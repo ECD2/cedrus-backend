@@ -103,4 +103,8 @@ run_js "$(bundle test/reliability-core.js src/services/briefEngine.js test/brief
 section "brief engine wiring (real insights.js)"
 run_js "$(bundle test/reliability-core.js src/services/insights.js src/services/briefEngine.js test/brief-engine-wiring.test.js)"
 
+# ── Bundle 13: discovery planner — deterministic plan core + read-layer + §6 gate
+section "discovery planner"
+run_js "$(bundle test/reliability-core.js src/services/discovery.js test/discovery.test.js)"
+
 printf '\n✅ All test bundles passed.\n'
