@@ -121,8 +121,22 @@ export function buildBatches(messages, { charBudget, batchChars, maxCalls } = {}
   const perBatch = batchChars || limits.batchChars;
   const calls = maxCalls || limits.maxModelCalls;
 
-  const scored = [];
+  // Dedup identical / whitespace-only-different messages BEFORE scoring: a
+  // re-pasted or duplicated conversation (a duplicated export, an idempotent
+  // re-import) must not spend token budget or double-propose the same fact.
+  // Identity is decided on a whitespace-collapsed, lowercased key; the first
+  // original spelling is kept so evidence quotes stay faithful.
+  const seen = new Set();
+  const unique = [];
   for (const text of messages) {
+    const norm = String(text == null ? '' : text).replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!norm || seen.has(norm)) continue;
+    seen.add(norm);
+    unique.push(text);
+  }
+
+  const scored = [];
+  for (const text of unique) {
     const score = scoreMessage(text);
     if (score >= MIN_SCORE) scored.push({ text, score });
   }
@@ -152,7 +166,7 @@ export function buildBatches(messages, { charBudget, batchChars, maxCalls } = {}
   }
   if (current.length && batches.length < calls) batches.push(current.join('\n---\n'));
 
-  return { batches, consideredMessages: kept.length, scoredOut: messages.length - scored.length };
+  return { batches, consideredMessages: kept.length, scoredOut: unique.length - scored.length };
 }
 
 // ── Proposal assembly ───────────────────────────────────────────────────────
@@ -341,8 +355,11 @@ async function runExtraction({ job, user, messages, deps }) {
       const { data: existing } = await d.db.from('facts')
         .select('person_id, fact_key, fact_value')
         .eq('user_id', user.id).eq('is_current', true).in('person_id', existingIds);
+      // Canonicalize the stored key (D5): proposed keys are canonical, so a
+      // legacy alias row (e.g. 'employer') must fold to 'job' to be recognised
+      // as already-known and default-unchecked in the review UI.
       const have = new Set((existing || []).map((r) =>
-        `${r.person_id}|${r.fact_key}|${String(r.fact_value).toLowerCase()}`));
+        `${r.person_id}|${canonicalFactKey(r.fact_key)}|${String(r.fact_value).toLowerCase()}`));
       for (const g of byIdentity.values()) {
         if (!g.person_id) continue;
         for (const f of g.facts) {
@@ -584,10 +601,18 @@ export async function confirmImport({ user, importId, accept }, deps = {}) {
       const { data: currentRows } = await d.db.from('facts')
         .select('fact_key, fact_value').eq('user_id', user.id)
         .eq('person_id', personId).eq('is_current', true);
+      // Key the idempotency + single-valued guard off the CANONICAL fact_key so
+      // a legacy row stored under a non-canonical alias (e.g. 'employer' folds
+      // to 'job') is still seen. Proposed facts are already canonical
+      // (harvestBatch), so without this the guard misses legacy rows and an
+      // import can add a duplicate row or fork a single-valued slot
+      // (docs/EXTRACTION_AUDIT.md D5).
       const currentByKey = new Map();
       for (const r of currentRows || []) {
-        if (!currentByKey.has(r.fact_key)) currentByKey.set(r.fact_key, new Set());
-        currentByKey.get(r.fact_key).add(String(r.fact_value).toLowerCase());
+        const rk = canonicalFactKey(r.fact_key);
+        if (!rk) continue;
+        if (!currentByKey.has(rk)) currentByKey.set(rk, new Set());
+        currentByKey.get(rk).add(String(r.fact_value).toLowerCase());
       }
 
       for (const f of facts) {
