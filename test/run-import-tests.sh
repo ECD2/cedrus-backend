@@ -19,4 +19,8 @@ echo "--- import: upload -> extract -> review -> confirm (bun mock.module) ---"
 bun test/import.test.mjs
 
 echo ""
+echo "--- import: service-layer dedup + idempotency, D5 (bun) ---"
+bun test/import-dedup.test.mjs
+
+echo ""
 echo "IMPORT SUITES PASSED"
