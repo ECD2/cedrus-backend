@@ -95,4 +95,12 @@ run_js "$(bundle test/reliability-core.js src/jobs/sweeps/select.js test/sweep-s
 section "insight engine"
 run_js "$(bundle test/reliability-core.js src/services/insights.js test/insights.test.js)"
 
+# ── Bundle 11: brief engine — pure select/compose/first-brief + read layer ──
+section "brief engine"
+run_js "$(bundle test/reliability-core.js src/services/briefEngine.js test/brief-engine.test.js)"
+
+# ── Bundle 12: brief engine — REAL insights.js feeds the brief end to end ────
+section "brief engine wiring (real insights.js)"
+run_js "$(bundle test/reliability-core.js src/services/insights.js src/services/briefEngine.js test/brief-engine-wiring.test.js)"
+
 printf '\n✅ All test bundles passed.\n'
