@@ -10,6 +10,11 @@ if command -v bun >/dev/null 2>&1; then bun test/import-parsers.test.mjs
 else node test/import-parsers.test.mjs; fi
 
 echo ""
+echo "--- import: adversarial / messy-input hardening corpus (dependency-free) ---"
+if command -v bun >/dev/null 2>&1; then bun test/import-hardening.test.mjs
+else node test/import-hardening.test.mjs; fi
+
+echo ""
 echo "--- import: upload -> extract -> review -> confirm (bun mock.module) ---"
 bun test/import.test.mjs
 

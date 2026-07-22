@@ -241,7 +241,13 @@ export function parseChatExport(buf, { maxJsonBytes = MAX_JSON_BYTES } = {}) {
 
   let root;
   try {
-    root = JSON.parse(jsonBuf.toString('utf8'));
+    // Strip a leading UTF-8 BOM before parsing: sniffFormat already accepts a
+    // BOM-prefixed JSON export (it skips the BOM to detect the array), but
+    // JSON.parse rejects U+FEFF, so a legitimately BOM'd bare-JSON upload
+    // (common from Windows editors) would otherwise fail as invalid_json.
+    let text = jsonBuf.toString('utf8');
+    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+    root = JSON.parse(text);
   } catch {
     fail('invalid_json', 'conversations.json is not valid JSON');
   }
