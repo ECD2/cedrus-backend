@@ -105,8 +105,10 @@ export async function runInboundPipeline({ from, body, messageSid, numSegments }
     completionTokens: parsed._usage?.completion_tokens, latencyMs: Date.now() - t0, success: true,
   });
 
-  // STAGE D — resolve entities (fuzzy backstop + create/merge) and write everything
-  const resolved = await resolveEntities({ user, parsed });
+  // STAGE D — resolve entities (Phase-1 confidence bands + create/merge) and write
+  // everything. `body` is threaded through so the resolver can read new-person
+  // phrasing cues ("met a guy named X") off the raw message.
+  const resolved = await resolveEntities({ user, parsed, body });
   await persist({ user, message, parsed, resolved });
 
   // STAGE E — reply
