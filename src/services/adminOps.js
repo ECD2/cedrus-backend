@@ -16,10 +16,13 @@ import adminRouter from '../routes/admin.js';
 //     without their `body` column at all.
 //   • The reset is NOT reimplemented. resetUserById() resolves id → phone
 //     and dispatches the existing hardened POST /admin/reset-user handler
-//     (src/routes/admin.js) in-process, so the TESTER_PHONES gate, the
-//     consent/audit preservation list and the account-rewind semantics have
-//     exactly one implementation. If that route ever changes, the panel
-//     inherits the change with zero drift.
+//     (src/routes/admin.js) in-process, so the consent/audit preservation list
+//     and the account-rewind semantics have exactly one implementation. If that
+//     route ever changes, the panel inherits the change with zero drift.
+//   • AUTHORIZATION is the panel's, not the allow-list's. A reset from the
+//     session-gated panel carries an in-process `adminAuthorized` flag that lets
+//     the inner handler reset ANY user, bypassing TESTER_PHONES. The allow-list
+//     still guards the inner route for raw x-admin-key / SMS founder callers.
 // ─────────────────────────────────────────────────────────────────────────
 
 // Panel token: ADMIN_PANEL_TOKEN if set (rotatable independently of Emil's
@@ -232,10 +235,11 @@ export async function userBilling(userId) {
 // Synthesizes a minimal Express-shaped request against the founder-admin
 // router and returns { status, body }. The x-admin-key header is supplied
 // from config server-side (never round-tripped through the caller), so the
-// inner route authenticates exactly as it would for curl. Everything the
-// inner tool enforces — allowlist, consent preservation, audit entry —
-// happens in the one existing implementation.
-function dispatchFounderAdmin({ method, url, body }) {
+// inner route authenticates exactly as it would for curl. `adminAuthorized`
+// threads the panel's session authorization to the inner handler so it can
+// reset any user; consent preservation and the audit entry still happen in the
+// one existing implementation.
+function dispatchFounderAdmin({ method, url, body, adminAuthorized = false }) {
   return new Promise((resolve) => {
     const headers = { 'x-admin-key': config.adminKey || '', 'content-type': 'application/json' };
     const req = {
@@ -248,6 +252,10 @@ function dispatchFounderAdmin({ method, url, body }) {
       body: body || {},
       get(name) { return headers[String(name).toLowerCase()]; },
     };
+    // Session-authorization signal for the inner reset handler. Set as a
+    // synthetic request property (NOT a header/body field) so it can only ever
+    // originate here — an external POST /admin/reset-user cannot forge it.
+    if (adminAuthorized) req.internalAdminAuthorized = true;
     const res = {
       statusCode: 200,
       status(code) { this.statusCode = code; return this; },
@@ -259,15 +267,18 @@ function dispatchFounderAdmin({ method, url, body }) {
   });
 }
 
-export async function resetUserById(userId) {
+export async function resetUserById(userId, { adminAuthorized = false } = {}) {
   const target = await getUserById(userId);
   if (!target) return { status: 404, body: { found: false } };
   // The inner tool fails closed without its own key; report, never bypass.
   if (!config.adminKey) {
     return { status: 503, body: { reset: false, error: 'reset backend disabled: ADMIN_KEY is unset' } };
   }
+  // adminAuthorized === a live admin session verified at the panel route. It
+  // authorizes the inner handler to reset ANY user, bypassing the TESTER_PHONES
+  // allow-list. Without it the inner handler still enforces the allow-list.
   const inner = await dispatchFounderAdmin({
-    method: 'POST', url: '/reset-user', body: { phone: target.phone },
+    method: 'POST', url: '/reset-user', body: { phone: target.phone }, adminAuthorized,
   });
   return { status: inner.status, body: inner.body, user_ref: 'u_' + target.id };
 }
