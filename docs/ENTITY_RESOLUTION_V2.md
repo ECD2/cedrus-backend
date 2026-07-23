@@ -3,6 +3,18 @@
 **Status:** DESIGN ONLY. No implementation in this document. This is the plan; the code
 change is a separate PR.
 
+**Phasing at a glance.** **Phase 1 SHIPPED** (commit `2c3ed07`): the two bug fixes only — the
+§1 confidence bands (the `entityResolution.js` verdict that deleted the `≥0.6` substring
+auto-merge; a genuinely-ambiguous mention now **defaults to CREATE, never a guessed merge**) and
+the §4 birthday routing. **Phase 2 — the subject of this document — is the ask-first
+clarification loop:** instead of silently defaulting-to-create on every ambiguous mention, HOLD
+the write and ask *one* candidate-listing question. **Refined 2026-07-23 (Emil dogfood):**
+§§1.4–1.5 / 2.1 / 2.3 / 2.4 / 3 below now bake in the candidate-listing ask, a precise
+near-match trigger, bare-name disambiguation, and last-initial timing; and the crisis-window +
+one-question-per-turn decisions are **LOCKED** (they were open questions in §7). Phase 2 itself
+ships in **two slices (§8)** — state machine + candidate matching first, last-initial second —
+so they do not all land in one blob, and each slice is exactly one Supabase migration.
+
 **Why now.** A live dogfood test (Emil, 2026-07-23) sent three texts in one minute:
 
 | text | intended person | what happened |
@@ -125,12 +137,69 @@ Return `{ kind, score, personId, candidates[] }` where:
 | `exact_name` | normalized name equals | 1.0 | yes (if no cue, single) |
 | `exact_alias` | normalized alias equals | 1.0 | yes (if no cue, single) |
 | `nickname` | curated equivalence table (Mike↔Michael, Alex↔Alexander, …) | 0.9 | yes (if no cue, single) |
-| `partial_substring` | one name contains the other, ≥3 chars | 0.5 | **no** — ASK or (cue) CREATE |
+| `near_match` (Phase 2 — supersedes `partial_substring`; **defined precisely in §1.5**) | small edit-distance / shared-prefix, not exact | 0.5 | **no** — hold + candidate-listing ASK (§2.4), or (cue) CREATE |
 | `none` | no match | 0 | n/a → CREATE |
 
 The **curated nickname table** replaces the substring rule for the "Mike/Michael" intent the
 backstop actually wanted. Surname/initial tokens are indexed so a future "Luca N." resolves to
 the right person, and a bare "Luca" when two exist yields `candidates=[…]` → ASK (§3).
+
+### 1.5 NEAR-MATCH — the precise ASK trigger (Phase 2 refinement)
+
+`near_match` is the Phase-2 replacement for the Phase-1 `partial_substring` heuristic as the
+signal that a mention *might* be an existing person but is not certain enough to merge. It is
+what fires the candidate-listing ASK (§2.4). Emil's instinct was "up to ~3 characters off," but
+every real case observed is **1–2 edits inside one short name family** (Luca ↔ Lucas ↔ Luka ↔
+Luc). The rule is tuned to catch that family and to **stay silent on genuinely different names**
+(Jon/Jan, Dan/Don, Sam/Pam): a false ASK is low-harm (it defaults to CREATE), but a false
+*silence-then-merge* is the exact bug being killed.
+
+**Normalize first.** Lowercase, strip accents/diacritics (José→jose), drop non-letters, collapse
+whitespace; compare on the **first-name token** only (surnames are handled by last-initial, §3).
+
+**M near-matches an existing first name E when — after normalization — ALL hold:**
+> `Levenshtein(M, E) ≤ 2`  **AND**  `min(len(M), len(E)) ≥ 3`  **AND**  M and E **share a leading
+> prefix of ≥ 2 letters.**
+
+One rule; it covers every observed case and rejects the traps:
+
+| pair | Lev | min len | shared prefix | near-match? |
+|---|---|---|---|---|
+| Luca ↔ Lucas | 1 | 4 | `luca` | ✅ |
+| Luca ↔ Luka | 1 | 4 | `lu` | ✅ |
+| Luca ↔ Luc | 1 | 3 | `luc` | ✅ |
+| Lucas ↔ Luka | 2 | 4 | `lu` | ✅ |
+| Luc ↔ Luka | 2 | 3 | `lu` | ✅ |
+| Ana ↔ Anna | 1 | 3 | `an` | ✅ |
+| Jon ↔ Jan | 1 | 3 | `j` (1) | ❌ prefix < 2 |
+| Dan ↔ Don | 1 | 3 | `d` (1) | ❌ |
+| Sam ↔ Pam | 1 | 3 | — | ❌ |
+| Bo ↔ Jo | 1 | 2 | — | ❌ min len < 3 |
+
+The **shared-2-letter-prefix** guard is what separates the typo family (Luca/Luka share `lu`)
+from different names that happen to be one edit apart (Jon/Jan, Dan/Don). `min len ≥ 3` drops
+2-letter names — too ambiguous to auto-ask; treat as exact-or-new. Exact equality is the
+`exact_name` band (silent merge) and never reaches here; a registered alias or the curated
+nickname table short-circuits to its own band *before* near-match is consulted, so Mike↔Michael
+is never a near-match ASK. A confirmed not-duplicate pair (§2.5) is excluded — once the user says
+"different," that pair never near-matches again.
+
+**Why ≤2 and not "≤3 chars off":** the bound is deliberately tight. On the short names dedup
+deals with (3–6 letters), an edit-distance of 3 spans most of the string, so even with a shared
+2-letter stem you would start asking about genuinely unrelated people; every real case observed
+is ≤2. The rule still *over*-fires occasionally at exactly 2 — e.g. Sara↔Sam and Mark↔Matt each
+share a 2-stem and sit 2 edits apart, so they trigger an ASK — and **that is fine on purpose:** a
+near-match only ever produces an ASK that **defaults to CREATE**, so an over-fire costs the user
+one word ("new"), while the failure being refused is the silent wrong merge. If real logs later
+show a missed dup at edit-distance 3, widen the bound then — measured, not speculatively.
+
+**Candidate set, cap, ordering.** Collect every owned, **active, non-self** person whose first
+name near-matches. None → CONFIDENT-NEW (create, no question). ≥1 → hold + ASK. **Cap the listed
+candidates at 3** to stay inside the one-question / 2-segment ceiling (§2.4); if >3 match (rare),
+list the top 3 and let "someone new / someone else" catch the rest. **Order** by (1) ascending
+edit distance (closest spelling first), then (2) interaction salience (most-recent
+`last_contact_at` / higher Dunbar tier), then (3) alphabetical as a stable tiebreak — so the
+most-likely-intended person leads the question and survives any trimming.
 
 ---
 
@@ -177,9 +246,13 @@ immediately; only the ambiguous mention's writes are held. Columns (described, n
 | `resolution` | `same` · `different` · `expired_default_new` · `cancelled` |
 | `resolved_person_id` | the person the held write was applied to |
 
-**One active question per user** — enforced by a partial unique index on `(user_id) WHERE
-status='active'`. Extra ambiguous mentions queue as `pending` (FIFO). We never send two dedup
-questions at once; the SMS thread stays clean.
+**One active question per user (LOCKED — decision 6).** Enforced by a partial unique index on
+`(user_id) WHERE status='active'`. At most one clarification is `active` at a time, so a reply
+carries **at most one question and never stacks** it with a second clarification. Extra ambiguous
+mentions queue as `pending` and are activated **strictly FIFO** (`created_at` order), only after
+the current one resolves or expires. This is the VOICE one-question rule
+(`PROGRESSIVE_PROFILING_DESIGN.md §2` "never stacks") enforced at the **data layer** so it holds
+even across turns. The SMS thread never shows two dedup questions.
 
 ### 2.2 How the inbound router dispatches (index.js), revised
 
@@ -231,6 +304,20 @@ of resolving or consuming a pending clarification. This is the central safety in
   but says nothing about an open confirmation hold when crisis fires mid-flow. This design
   decides: leave the held clarification intact and untouched. Recommend adding this rule to
   `CEDRUS_SAFETY_AND_CRISIS_ESCALATION_SPEC.md` so it is specced, not just implemented.
+- **Post-crisis suppression window — never ask in the crisis's shadow (LOCKED — decision 5).**
+  Beyond the single crisis turn, a dedup question is *trivial bookkeeping*; sending it while the
+  user is inside the **48h safety suppression window** (`safetyFlags.isInSuppressionWindow(userId)`,
+  opened by any Category A–D signal) is tone-deaf. So the loop **reads that window before any
+  user-facing clarification message**: while it is open, Cedrus **emits no initial ASK and no
+  re-ask**, and suppresses the optional post-expiry note — the ambiguous write just stays held.
+  The **silent** side keeps working: confident saves persist, and the expiry sweep may still
+  *resolve* a timed-out hold to **CREATE-new** (no message to the user, so the window is honored).
+  **On timeout inside the window the resolution is CREATE, never a guessed merge** — a duplicate is
+  cheaply merged later; a wrong merge silently corrupts. This *refines* the "the sweep is factual
+  so the §6 promo window does not pause it" note below: the sweep's **silent resolution** still
+  runs; every **user-facing** clarification message now also respects the **safety** window.
+  **Recommend specing this in `CEDRUS_SAFETY_AND_CRISIS_ESCALATION_SPEC.md`** (next to the
+  crisis-turn "leave it untouched" rule) so both are specced, not just implemented.
 - **Reply unrelated / ignored.** The user ignores the question and says something new. The new
   message is processed normally (STEP 2). The clarification stays active; we re-ask **at most
   once** (a single low-pressure clause appended to that turn's reply), then leave it to expiry.
@@ -239,13 +326,16 @@ of resolving or consuming a pending clarification. This is the central safety in
   `active|pending` rows past `expires_at` and resolves them to **`expired_default_new`**:
   create the person + apply `held_payload`, then activate the next queued item. **Default is
   CREATE, never a guessed merge** — a duplicate is cheaply mergeable later; a wrong merge
-  silently corrupts. Optionally one brief factual note ("I saved Lucas as someone new; tell me
-  if that's wrong"). This sweep is an ordinary factual task, so the §6 promo-suppression window
-  does **not** pause it (mirrors how `dailySweeps.js:25-32` keeps goal follow-ups and birthday
-  alerts flowing while pausing only the playful layer).
-- **Multiple pending.** Only one `active` at a time (partial unique index). Two ambiguous
-  mentions in one message → ask the first, queue the second; ask it after the first resolves or
-  expires. (Batching two into one question is possible but off by default; see §7.)
+  silently corrupts. The **silent resolution** (create + apply held payload) is an ordinary
+  factual task and always runs — the §6 promo-suppression window does not pause it (mirrors how
+  `dailySweeps.js:25-32` keeps goal follow-ups and birthday alerts flowing while pausing only the
+  playful layer). The optional post-expiry note ("I saved Lucas as someone new; tell me if that's
+  wrong") **is** a user-facing message, so it is **held while the safety suppression window is
+  open** (decision 5) and sent only after it closes, if at all.
+- **Multiple pending (LOCKED — decision 6).** Only one `active` at a time (partial unique index).
+  Two+ ambiguous mentions in one message → ask the first, queue the rest as `pending`; each is
+  activated **strictly FIFO** after the prior resolves or expires. One question per turn, never
+  stacked. (Batching two into one question is possible but off by default; see §7.)
 - **Sensitive / negative turn.** If THIS message's band is `sensitive_neutral | negative`,
   **do not ask this turn.** Hold the write silently and let a later routine turn or the expiry
   sweep resolve it. Asking a bookkeeping question mid-heavy-disclosure violates the empathy
@@ -260,13 +350,30 @@ deterministically**, never model-drafted, mirroring the safety fixed-template ph
 (§10: reviewed text, not a prompt hope) and `voiceGuard`'s "structural, not a prompt hope".
 It **reuses the existing web dedup copy** for voice consistency (see §2.5), not new phrasing:
 
-- **New-vs-existing** (the Lucas case): `Quick check: is <NewName> the same person as
-  <ExistingName> (<their relationship>), or someone new?` — mirrors
-  `PEOPLE_AND_PRIORITY_UX.md §3` "You already have an Ana (your sister). Same person?".
-  Including the existing person's relationship tag is what makes the question answerable.
-- **Which-of-two** (two owned people share the first name): reuse the existing microcopy key
-  `capture.clarify.person` — "Which <name>: your sister, or <name> from the gym?"
-  (`CONTENT_AND_MICROCOPY_EN_ES.md`, `CAPTURE_AND_CONVERSATION_UX.md §5`).
+- **Candidate-listing near-match** (the Luca/Luka/Lucas case, decision 1) — **not a yes/no.**
+  When the mention near-matches one or more existing people (§1.5), **list them and offer "new
+  person" in ONE question**, so the user *picks* rather than confirming a guess:
+  - one candidate: `Quick check: is <NewName> a new person, or do you mean <Cand1> (<rel>)?`
+  - two/three candidates: `Is <NewName> a new person, or do you mean <Cand1> or <Cand2>?`
+    → e.g. **"Is Luka a new person, or do you mean Luca or Lucas?"**
+  - a misspelling that matches only existing people (no confident new reading) leads with
+    "did you mean": → **"Did you mean Luca, Lucas, or Luka?"** (the bare "Luc" case).
+  Candidates render through `displayName` (so colliding names read "Luca C." / "Luca M.", §3),
+  are **capped at 3** and ordered per §1.5, each tagged with its relationship where known — the
+  tag is what makes an option answerable (`PEOPLE_AND_PRIORITY_UX.md §3` "You already have an Ana
+  (your sister)."). **"New person" is ALWAYS an explicit option**, so the safe default (CREATE) is
+  one word away.
+- **Bare-name disambiguation** (two+ owned people share the name exactly, decision 3): a bare
+  "Luca did X" with a `Luca C.` and a `Luca M.` on file. Hold the fact and ask which before
+  attaching, reusing microcopy key `capture.clarify.person`: `Which Luca: C. (your brother) or
+  M. (from work)?` — candidates as `displayName` + relationship/context tag.
+  **How the reply resolves (deterministic backstop):** match the answer against the listed
+  candidates by, in order, (a) last-initial letter ("C" / "Luca C" / "the C one"), (b)
+  relationship or context word ("my brother" / "work"), (c) an ordinal / position ("first", "the
+  second"), (d) "new" / "someone else" → CREATE a new person (which then earns its own
+  last-initial, §3). A confident match attaches the held fact to that person; still-unclear → one
+  gentle re-ask (subject to the re-ask cap **and** the suppression-window gate, §2.3), then expiry
+  defaults to CREATE — **never a guessed pick** among the candidates.
 - **Bilingual.** Cedrus is EN/ES; the em-dash ban is "English or Spanish"
   (`cedrus-sms-voice.md §2`). Author both variants by extending the EN/ES microcopy file, not
   by inventing one-off strings.
@@ -313,9 +420,15 @@ one consistent Cedrus across channels and merges share one mechanism:
 
 ## 3. Same-first-name disambiguation ("Luca" vs "Luca N.")
 
-**Trigger.** After a clarification resolves `different` (or a confident-new create), if the new
-person's normalized first name equals an existing **active, non-self** person's first name for
-this user, apply a disambiguating label. (Single-"Luca" users never see a label.)
+**LOCKED (decision 4) — assigned lazily, on collision.** The last-initial is **not** set at every
+person create; it is derived **the moment a first-name collision is created.** When a
+CONFIDENT-NEW create or a clarification resolved `different` yields a person whose normalized
+first name equals an existing **active, non-self** person for this user, Cedrus derives a
+last-initial for **both** the new person **and** the previously-unlabeled twin (which needed none
+while it was the only "Luca"). Single-"Luca" users never see a label; it appears exactly when — and
+only when — a second same-first-name person exists, and stays put thereafter.
+
+**Trigger.** A first-name collision among the user's active, non-self people, as above.
 
 **Deriving the label**, in priority order:
 1. **Last-name initial** from a stated surname in the mention/message ("Luca Nannini" / "Luca
@@ -333,6 +446,13 @@ column is recommended for clean display and matching.)
 **Where it surfaces.** A single new helper `people.displayName(person, siblings)` returns
 `"Luca"` normally and `"Luca N."` only when a first-name collision exists among the user's
 active people. It is used **everywhere a name is rendered**:
+- **the clarification questions themselves (decision 4 × decisions 1/3)** — the candidate-listing
+  ASK and the bare-name disambiguation ASK (§2.4) render each candidate through `displayName`, so
+  colliding people read "Luca C." / "Luca M." *inside the question*. That label is how the user
+  tells them apart when answering, and how the deterministic backstop maps the reply ("C" → Luca
+  C.). Without the column, a bare-name-of-two question falls back to relationship tags ("your
+  brother, or from work?") — which is why bare-name disambiguation *works* without it but reads
+  *cleaner* with it (a phasing seam, §8).
 - the model's `KNOWN PEOPLE` context block (`messages.js:buildContext` → so future mentions
   disambiguate and resolve to the right id),
 - the dashboard / brief,
@@ -412,23 +532,33 @@ cannot write cross-tenant (the `people.js:5-24` WS-A guarantee holds unchanged).
 | `src/pipeline/index.js` | insert clarification dispatch after `understand()`; crisis bypass; reply composition | code |
 | `src/services/messages.js` | `buildContext` loads the active clarification into model context | code |
 | `src/jobs/sweeps/clarificationExpiry.js` **(new)** + `src/jobs/scheduler.js` | expiry → default-to-new; activate next queued; register cron (~15 min) | code |
-| `docs/ENTITY_RESOLUTION.proposed.sql` **(new)** | the migration (below), per the repo's `*.proposed.sql` convention | migration |
+| `docs/ENTITY_RESOLUTION_CLARIFICATIONS.proposed.sql` **(new)** | Phase 2a migration — `pending_clarifications` table + its 3 indexes | migration |
+| `docs/ENTITY_RESOLUTION_LAST_INITIAL.proposed.sql` **(new)** | Phase 2b migration — `people.last_initial` column | migration |
 
-### 5.4 Migrations to flag
+### 5.4 Migrations to flag — finalized as two PROPOSED files
 
-1. **`pending_clarifications` table (required)** — columns per §2.1, with a **partial unique
-   index `(user_id) WHERE status='active'`** to enforce one outstanding question per user, and
-   an index on `(status, expires_at)` for the sweep.
-2. **`people.last_initial` column (required for §3)** — nullable text/char. (Or the
-   no-migration alias-encoding fallback; the column is recommended.)
-3. **Not-duplicate memory (§2.5)** — either reuse the web `person_merges` "keep separate"
-   record, or add a small `person_not_duplicates` set `(user_id, person_id_a, person_id_b)`.
-   Decide with the web-merge owner to keep one mechanism.
-4. **Birthday fix — no migration** (`birthday_month/day` exist). Optional future
-   `people.birthday_year`.
+1. **`pending_clarifications` table (required — Phase 2a; file
+   `ENTITY_RESOLUTION_CLARIFICATIONS.proposed.sql`)** — columns per §2.1, with a **partial unique
+   index `(user_id) WHERE status='active'`** (the one-active / never-stacks invariant, decision 6),
+   a **FIFO index `(user_id, created_at) WHERE status='pending'`** for next-in-queue pickup, and a
+   **`(status, expires_at)` index** for the expiry sweep.
+2. **`people.last_initial` column (required for §3 — Phase 2b; file
+   `ENTITY_RESOLUTION_LAST_INITIAL.proposed.sql`)** — nullable text. (The no-migration
+   alias-encoding fallback is dropped; the column is LOCKED as the choice, §7.)
+3. **Not-duplicate memory (§2.5) — NOT ddl'd yet, by intent.** Either reuse the web
+   `person_merges` "keep separate" record, or add a small `person_not_duplicates` set
+   `(user_id, person_id_a, person_id_b)`. Decide with the web-merge owner to keep **one** mechanism
+   before Phase 2a's `different` path writes to it; no proposed SQL until that call is made
+   (flagged, not invented).
+4. **Birthday fix — no migration** (`birthday_month/day` exist, populated in Phase 1). Optional
+   future `people.birthday_year`.
 
-Authored as `docs/ENTITY_RESOLUTION.proposed.sql`, a sibling of `DISCOVERY.proposed.sql` /
-`INSIGHTS.proposed.sql`. (This design doc contains no SQL by intent.)
+**Finalized as two PROPOSED (unrun) files, one per Phase-2 slice (§8)** — so each is a single
+Supabase ceremony, not one blob: `docs/ENTITY_RESOLUTION_CLARIFICATIONS.proposed.sql` (Phase 2a)
+and `docs/ENTITY_RESOLUTION_LAST_INITIAL.proposed.sql` (Phase 2b), siblings of
+`DISCOVERY.proposed.sql` / `INSIGHTS.proposed.sql`. Both are **NOT EXECUTED, NOT part of deploy**
+— Emil runs each through the Supabase ceremony at the start of its slice. (This design doc still
+contains no SQL by intent — the DDL lives only in the two `.proposed.sql` files.)
 
 ---
 
@@ -438,34 +568,106 @@ Authored as `docs/ENTITY_RESOLUTION.proposed.sql`, a sibling of `DISCOVERY.propo
   trio → new person for "met a guy named Lucas"; birthday emitted in `birthdays[]` not
   `reminders`.
 - **Band verdict unit tests** (pure, like `voiceGuard`/`safetyDetection`): exact → merge;
-  substring + cue → create; substring, no cue → ask; ambiguous → ask; foreign id → refused.
+  near-match + cue → create; near-match, no cue → ask; ambiguous → ask; foreign id → refused.
+- **Near-match rule (pure, §1.5):** Luca/Luka/Lucas/Luc pairwise → near-match; Jon/Jan, Dan/Don,
+  Sam/Pam → NOT (shared prefix < 2); Bo/Jo → NOT (min len < 3); exact-equal / alias / nickname not
+  routed here; candidate cap = 3; ordering = edit-distance, then salience, then alpha.
+- **Candidate-listing question (§2.4, decision 1):** one/two/three near-matches → a single
+  question listing them + "new person" ("Is Luka a new person, or do you mean Luca or Lucas?");
+  bare "Luc" matching only existing → "Did you mean Luca, Lucas, or Luka?"; >3 → top-3 + "someone
+  else"; never a yes/no; inside the 2-segment ceiling; no em dash / exclamation / upsell.
+- **Bare-name disambiguation (§2.4, decision 3):** bare "Luca" with two owned Lucas → a "which"
+  question; reply by last-initial / relationship / ordinal / "new" resolves to the right person or
+  CREATE; unclear → one re-ask then CREATE (never a guessed pick).
 - **Clarification state machine:** ask → same / different / unclear / expire; one-active
   invariant; FIFO queue; re-ask cap.
 - **Crisis-bypass:** a crisis message while a clarification is active never resolves,
   consumes, or expires it, and writes no product content.
+- **Suppression-window gate (decision 5):** with `safetyFlags.isInSuppressionWindow(user)` true,
+  no initial ASK and no re-ask are emitted and the post-expiry note is withheld; a hold that times
+  out in-window still resolves **silently to CREATE** (never a merge); asking resumes once the
+  window closes.
 - **Not-duplicate memory:** a confirmed `different` pair is never re-asked on a later mention.
 - **Birthday routing:** "X's birthday is Nov 12" → `people.birthday_month/day` populated;
   `getBirthdaysForUser` returns it; the insight engine now emits a birthday reason in-window.
 
 ---
 
-## 7. Open questions / tradeoffs (call before building)
+## 7. Decisions — locked vs. still open
 
+**LOCKED 2026-07-23 (Emil dogfood refinement):**
+- **Candidate-listing ask, not yes/no** (decision 1, §2.4) — a near-match holds the write and
+  lists the candidate(s) + "new person" in one question.
+- **Near-match trigger** (decision 2, §1.5) — `Levenshtein ≤ 2` ∧ `min len ≥ 3` ∧ a shared
+  2-letter prefix; candidates capped at 3, ordered edit-distance → salience → alpha. Explicitly
+  **not** a flat "≤3 chars off."
+- **Bare-name disambiguation** (decision 3, §2.4) — a bare name matching 2+ owned people asks
+  which; the reply resolves by last-initial / relationship / ordinal / "new."
+- **Last-initial timing & surface** (decision 4, §3) — derived **lazily on first-name collision**
+  for both twins; stored in `people.last_initial` (the **column is the chosen mechanism**;
+  alias-encoding dropped); surfaced via `displayName` in **questions and display**; the `name`
+  column is never mutated.
+- **Post-crisis suppression window** (decision 5, §2.3) — a trivial clarification respects
+  `safetyFlags.isInSuppressionWindow`: **no ASK / re-ask / note while it is open**; on timeout it
+  defaults to **CREATE, never a guessed merge**; and the crisis turn itself leaves any held
+  clarification untouched. **Recommend folding both into
+  `CEDRUS_SAFETY_AND_CRISIS_ESCALATION_SPEC.md`** so they are specced, not just implemented.
+- **One question per turn, FIFO** (decision 6, §§2.1/2.3) — one `active` per user (DB partial
+  unique index); extras queue and activate strictly FIFO; a reply never stacks two questions.
+- **Phasing** (§8) — two slices, two migrations: state machine + candidate matching first,
+  last-initial second.
+
+**Still open (call before / while building):**
 - **TTL for a held clarification.** Proposed 72h — long enough for SMS cadence, short enough to
-  avoid stale merges. (Expiry defaults to CREATE regardless.)
+  avoid stale merges (a Phase-2a tuning knob; expiry defaults to CREATE regardless).
 - **Batch two ambiguous mentions from one message into one question?** Default: no (sequential,
   one active). Revisit if it proves common.
-- **Keep a derived birthday reminder row?** Default: no (person columns are the source of
-  truth). Reconsider only if the reminder job needs an explicit row.
-- **`last_initial` column vs. alias-encoded disambiguator.** Recommend the column.
+- **Keep the derived birthday reminder row?** Phase 1 SHIPPED **keeping** it; the person columns
+  are the engines' source of truth. Reconsider dropping the derived row only if it causes dupes.
 - **`clarification_answer` model reliability.** Keep the deterministic backstop; measure model
   agreement from logs before trusting it alone.
 - **Bilingual copy.** The question needs EN + ES variants in the shared microcopy file; confirm
   the ES phrasing with the voice owner (mirror `capture.clarify.person`).
 - **Not-duplicate storage.** Reuse `person_merges`' "keep separate" record, or add a sibling
-  `person_not_duplicates` set — decide with whoever owns the web merge table.
-- **Safety-spec gap.** The crisis-vs-held-clarification interaction is unspecified today (§2.3);
-  confirm the "leave it untouched" decision and fold it into the SAFETY spec.
+  `person_not_duplicates` set — decide with whoever owns the web merge table (blocks nothing else;
+  no proposed SQL until decided, §5.4).
+
+---
+
+## 8. Build phasing (recommended) — two slices, two migrations
+
+Phase 2 has three moving parts that should **not** land together: the clarification **state
+machine**, the **candidate matching**, and **last-initial** display. Ship them as two slices,
+each gated by exactly one Supabase migration, so a regression in the display polish can't hold up
+the wrong-merge fix users actually feel — and so no single PR carries the whole surface.
+
+**Phase 2a — the ask-first loop (minimal shippable slice; the wrong-merge stopper).**
+- **Migration:** `ENTITY_RESOLUTION_CLARIFICATIONS.proposed.sql` (`pending_clarifications` + its
+  three indexes).
+- **Code:** `clarifications.js` state machine (enqueue / getActive / resolve / expire; one-active
+  + FIFO); the §1.5 near-match candidate matching; the candidate-listing ASK (§2.4,
+  new-vs-existing); hold + apply `held_payload`; model-first / deterministic-backstop answer
+  interpretation; not-duplicate memory; the crisis bypass + suppression-window gate (§2.3); the
+  expiry sweep (default → CREATE). `index.js` dispatch; `messages.buildContext` loads the active
+  question.
+- **Does NOT need last-initial.** Candidates list by name + relationship/context tag; the
+  bare-name-of-two ASK (§2.4) works here too, resolved by relationship / ordinal. This slice
+  delivers the entire "ask before merging Luca/Lucas, and never merge a stranger" value with **one
+  table and zero name-display churn.**
+
+**Phase 2b — last-initial disambiguation (additive polish; independent).**
+- **Migration:** `ENTITY_RESOLUTION_LAST_INITIAL.proposed.sql` (`people.last_initial`).
+- **Code:** `people.displayName(person, siblings)` + lazy on-collision derivation/assignment (§3);
+  upgrade the 2a candidate listings and bare-name ASK to render "Luca C." / "Luca M."; surface the
+  label in the KNOWN PEOPLE context block, dashboard/brief, and insight/discovery copy.
+- Depends on 2a only for the bare-name ASK surface; otherwise a **self-contained display layer**
+  that can bake and ship a cycle later **without touching 2a's schema or state machine.**
+
+**Decide before either (does not block 2a's start, but 2a's `different` path writes to it):** the
+**not-duplicate storage** choice (reuse `person_merges` "keep separate" vs a new
+`person_not_duplicates` set) — resolve with the web-merge owner (§5.4). The **held-clarification
+TTL** (propose 72h) and whether to **batch** two mentions into one question are 2a tuning knobs,
+safe to set at build time. 2b introduces **no** migration beyond the one column.
 
 **Compliance summary.** New ask surface: authored in code (reused web copy), EN/ES, band
 `routine`, no em dash / exclamation / upsell, one question only (never stacks), under the
