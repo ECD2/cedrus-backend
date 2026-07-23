@@ -62,6 +62,9 @@ OUTPUT SHAPE
   "goals": [
     { "person_ref": "mention_text or null", "goal_text": "...", "due_at": "ISO-8601 or null" }
   ],
+  "birthdays": [
+    { "person_ref": "mention_text this is about", "month": 1, "day": 1, "year": null }
+  ],
   "prompt_answer": {
     "answers_prompt_id": "uuid of the open question this answers, or null",
     "interpreted": "yes | no | partial | unrelated",
@@ -154,7 +157,9 @@ REMINDERS & DATES
 - Resolve every relative time against CURRENT DATETIME in the user's timezone and
   output trigger_at as a full ISO-8601 timestamp WITH offset.
   current 2026-06-16 (-04:00), "9pm tomorrow" -> "2026-06-17T21:00:00-04:00"
-- A birthday mentioned belongs on the person; a one-off "remind me to..." goes in reminders.
+- A birthday stated for a person -> put its month + day (and year if given) in
+  birthdays[], AND also add a birthday reminder (reminder_type "birthday") as before.
+  A one-off "remind me to..." goes in reminders only.
 
 ANSWERING OPEN QUESTIONS
 - If the message answers one of the OPEN QUESTIONS, set answers_prompt_id to its id

@@ -34,6 +34,24 @@ export function isTautologicalFact(factKey, factValue) {
   ].includes(val);
 }
 
+// ── Birthday routing (docs/ENTITY_RESOLUTION_V2.md §4). A stated birthday must
+// populate the STRUCTURED people.birthday_month/day the insight/discovery engines
+// read — not only a reminders row (the observed bug: "Quin's birthday is Nov 12"
+// created a reminder but left the person columns null). Pure + unit-tested.
+export function validBirthday(month, day) {
+  return Number.isInteger(month) && month >= 1 && month <= 12
+      && Number.isInteger(day) && day >= 1 && day <= 31;
+}
+// A birthday reminder's trigger_at is a full ISO-8601 timestamp already localized to
+// the user (offset included), so the calendar date in the string IS the birthday.
+// Read month/day off the YYYY-MM-DD prefix — no timezone math, no Date parsing.
+export function monthDayFromIsoDate(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+  if (!m) return null;
+  const month = parseInt(m[2], 10), day = parseInt(m[3], 10);
+  return validBirthday(month, day) ? { month, day } : null;
+}
+
 // Writes the model's extraction to Supabase and runs the pending-prompt cascade.
 export async function persist({ user, message, parsed, resolved }) {
   // Priority 0: a crisis/boundary turn writes NO product content (safety spec §7).
@@ -112,20 +130,43 @@ export async function persist({ user, message, parsed, resolved }) {
     } catch (err) { logger.warn('persist: skipped bad saved item', s.title, String(err)); }
   }
 
+  // birthdays -> structured people.birthday_month/day (the field the engines read).
+  // A birthday can arrive as a structured birthdays[] item (preferred) OR only as a
+  // birthday reminder (what the model did in production); we populate the person
+  // columns from EITHER, so the fix is robust to model variance. Ownership-scoped.
+  const birthdayHandled = new Set();
+  for (const b of parsed.birthdays || []) {
+    const personId = ref(b.person_ref);
+    const month = Number(b.month), day = Number(b.day);
+    if (!personId) continue;
+    if (!validBirthday(month, day)) { logger.warn('persist: skipped invalid birthday', b.month, b.day); continue; }
+    try { await people.setBirthday(user.id, personId, { month, day }); birthdayHandled.add(personId); }
+    catch (err) { logger.warn('persist: skipped bad birthday', String(err)); }
+  }
+
   // reminders + goals
   for (const r of parsed.reminders || []) {
     if (!r.trigger_at || isNaN(new Date(r.trigger_at).getTime())) {
       logger.warn('persist: skipped reminder with bad trigger_at', r.trigger_at);
       continue;
     }
+    const personId = ref(r.person_ref);
+    const reminderType = pick(r.reminder_type, REMINDER_TYPES, 'custom');
     try {
       await memory.addReminder({
-        userId: user.id, personId: ref(r.person_ref), title: r.title || 'Reminder',
-        triggerAt: r.trigger_at,
-        reminderType: pick(r.reminder_type, REMINDER_TYPES, 'custom'),
-        sourceMessageId: message.id,
+        userId: user.id, personId, title: r.title || 'Reminder',
+        triggerAt: r.trigger_at, reminderType, sourceMessageId: message.id,
       });
     } catch (err) { logger.warn('persist: skipped bad reminder', r.title, String(err)); }
+    // Keep the reminder (above) AND backfill the structured birthday from it, so a
+    // model that files a birthday ONLY as a reminder still populates people.birthday.
+    if (reminderType === 'birthday' && personId && !birthdayHandled.has(personId)) {
+      const md = monthDayFromIsoDate(r.trigger_at);
+      if (md) {
+        try { await people.setBirthday(user.id, personId, md); birthdayHandled.add(personId); }
+        catch (err) { logger.warn('persist: birthday backfill failed', String(err)); }
+      }
+    }
   }
   for (const g of parsed.goals || []) {
     if (!g.goal_text) continue;

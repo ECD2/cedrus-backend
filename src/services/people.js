@@ -108,6 +108,18 @@ export async function getBirthdaysForUser(userId) {
   return data || [];
 }
 
+// Set a person's structured birthday (month/day) — the field getBirthdaysForUser
+// and the insight/discovery engines actually read. Scoped by user_id (ownership
+// guard), so a foreign person_id is a no-op, never a cross-tenant write. Mirrors
+// setRelationship. Year is intentionally NOT written: there is no people.birthday_year
+// column (docs/ENTITY_RESOLUTION_V2.md §4) and the engines use month/day only.
+export async function setBirthday(userId, personId, { month, day } = {}) {
+  requireUser(userId, 'setBirthday');
+  if (!personId || month == null || day == null) return;
+  await supabase.from('people').update({ birthday_month: month, birthday_day: day })
+    .eq('id', personId).eq('user_id', userId);
+}
+
 // Scoped by user_id: markNudged never touches a person that isn't this user's.
 export async function markNudged(userId, personId) {
   requireUser(userId, 'markNudged');

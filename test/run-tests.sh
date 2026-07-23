@@ -53,7 +53,7 @@ OUT="$(mktemp -t cedrus-tests).js"
   # REAL people.js (ownership guard + user-scoped writes), not a stub: persist's
   # call signatures into this service are load-bearing and must be exercised.
   strip src/services/people.js
-  echo 'const people = { rename, setRelationship };'
+  echo 'const people = { rename, setRelationship, setBirthday };'
   strip src/pipeline/07_persist.js
   cat test/fact-supersession.test.js
 } > "$OUT"
@@ -106,5 +106,23 @@ run_js "$(bundle test/reliability-core.js src/services/insights.js src/services/
 # ── Bundle 13: discovery planner — deterministic plan core + read-layer + §6 gate
 section "discovery planner"
 run_js "$(bundle test/reliability-core.js src/services/discovery.js test/discovery.test.js)"
+
+# ── Bundle 14: entity resolution — Phase-1 confidence bands (wrong-person merge fix)
+section "entity resolution"
+run_js "$(bundle test/reliability-core.js src/services/entityResolution.js test/entity-resolution.test.js)"
+
+# ── Bundle 15: birthday routing — a stated birthday populates people.birthday_month/day
+section "birthday routing"
+OUTB="$(mktemp -t cedrus-tests).js"
+{
+  cat test/stubs.js
+  strip src/services/memory.js
+  echo 'const memory = { addFact, canonicalFactKey, addSavedItem, addReminder, addGoal };'
+  strip src/services/people.js
+  echo 'const people = { rename, setRelationship, setBirthday };'
+  strip src/pipeline/07_persist.js
+  cat test/birthday-routing.test.js
+} > "$OUTB"
+run_js "$OUTB"
 
 printf '\n✅ All test bundles passed.\n'
