@@ -108,15 +108,23 @@ panel.get('/users/:id/billing', requirePanelAuth, requireUserIdShape, guarded(as
   res.json(billing);
 }));
 
-// ── POST /admin/users/:id/reset — pass-through to the hardened tool ─────
-// Allowlist gate, consent preservation and the inner audit entry all come
-// from the one existing implementation (see adminOps.resetUserById).
+// ── POST /admin/users/:id/reset — session-authorized reset of ANY user ──
+// Authorization moved from the TESTER_PHONES allow-list to admin-session auth:
+// a live admin session (email+password+TOTP, set by adminSessionAdapter and
+// verified by requirePanelAuth) authorizes resetting ANY user, so beta-tester
+// ops aren't blocked by the allow-list. A request that satisfies requirePanelAuth
+// with only a shared x-admin-key (no session) carries no such authorization and
+// stays subject to the inner allow-list gate. Consent preservation, account
+// rewind and the inner audit entry still come from the one implementation
+// (adminOps.resetUserById → the src/routes/admin.js handler).
 panel.post('/users/:id/reset', requirePanelAuth, requireUserIdShape, guarded(async (req, res) => {
-  const out = await resetUserById(req.params.id);
+  const adminAuthorized = Boolean(req.adminSession);
+  const out = await resetUserById(req.params.id, { adminAuthorized });
   logger.event('admin_panel.reset.requested', {
     outcome: out.status === 200 ? 'accepted' : 'denied',
     status_code: out.status,
     user_ref: out.user_ref,
+    authorized_via: out.status === 200 ? (adminAuthorized ? 'admin_session' : 'tester_allowlist') : undefined,
     reason: out.status === 200 ? undefined
       : (out.status === 404 ? 'user_not_found' : (out.status === 503 ? 'reset_backend_disabled' : 'not_on_tester_allowlist')),
   });

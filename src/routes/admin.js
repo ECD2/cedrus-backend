@@ -111,10 +111,19 @@ router.post('/reset-user', async (req, res) => {
   const rawPhone = req.body?.phone;
   const phone = normalizePhone(rawPhone);
 
-  // Hard gate: refuse unless the target is on the explicit TESTER_PHONES
-  // allow-list. This is a testing tool for Emil + beta testers, never a
-  // general "wipe any account" lever.
-  if (!phone || !config.testerPhones.includes(phone)) {
+  // Authorization, in priority order:
+  //   1. A live admin SESSION (email+password+TOTP, audited). It is signalled by
+  //      `req.internalAdminAuthorized`, which ONLY the in-process panel dispatch
+  //      (adminOps.dispatchFounderAdmin, reached through the session-gated panel
+  //      route) sets. It is a synthetic request property, never read from a
+  //      header or body, so no external caller of POST /admin/reset-user can
+  //      forge it. A session authorizes resetting ANY user (beta-tester ops).
+  //   2. Otherwise, the explicit TESTER_PHONES allow-list. This remains the
+  //      authorization for raw x-admin-key callers (curl) and SMS founder tools,
+  //      which are not strongly authed — for them the reset stays a testers-only
+  //      lever, never a general "wipe any account" one.
+  const sessionAuthorized = req.internalAdminAuthorized === true;
+  if (!sessionAuthorized && (!phone || !config.testerPhones.includes(phone))) {
     logger.event('admin.reset_user.denied', {
       level: 'warn', error_category: 'auth', status_code: 403,
       user_ref: phone ? 'ph_' + phone.slice(-4) : undefined,
@@ -165,7 +174,11 @@ router.post('/reset-user', async (req, res) => {
     // reset happened and what it cleared, independent of the now-deleted data.
     logger.event('admin.reset_user', {
       user_ref: userRef, outcome: 'accepted',
-      meta: { deleted_counts: deleted, preserved: ['consent_events', 'subscriptions', 'agent_runs', 'integrations'] },
+      meta: {
+        authorized_via: sessionAuthorized ? 'admin_session' : 'tester_allowlist',
+        deleted_counts: deleted,
+        preserved: ['consent_events', 'subscriptions', 'agent_runs', 'integrations'],
+      },
     });
 
     res.json({

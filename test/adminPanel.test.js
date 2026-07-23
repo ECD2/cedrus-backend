@@ -20,11 +20,14 @@
   const { check, done } = makeChecker();
 
   // ── dispatch helper: synthetic request into the panel router ────────────
-  function call(method, url, { key, body } = {}) {
+  function call(method, url, { key, body, session } = {}) {
     return new Promise((resolve) => {
       const headers = {};
       if (key !== undefined) headers['x-admin-key'] = key;
       const req = { method, url, headers, body: body || {} };
+      // A live admin session, as adminSessionAdapter would attach in production.
+      // requirePanelAuth accepts it directly (stronger than the shared token).
+      if (session !== undefined) req.adminSession = session;
       const res = {
         statusCode: 200,
         headersSent: false,
@@ -317,6 +320,38 @@
   check('inner audit entry written (admin.reset_user)', eventsNamed('admin.reset_user').length === 1);
   check('panel audit entry written (accepted)',
     eventsNamed('admin_panel.reset.requested').some((e) => e.outcome === 'accepted' && e.user_ref === 'u_' + U1));
+
+  // 6e. INFRA-26: an ADMIN SESSION authorizes resetting a NON-allowlisted user.
+  //     First confirm the allow-list still gates the raw x-admin-key path (weak
+  //     auth stays testers-only), then that a session bypasses it end-to-end.
+  seedAll();
+  r = await call('POST', '/users/' + U2 + '/reset', { key: KEY }); // no session
+  check('raw x-admin-key + non-allowlisted -> still 403 (gate intact for weak auth)',
+    r.status === 403 && r.body.reset === false);
+  check('U2 untouched by the refusal', __rows('facts').filter((x) => x.user_id === U2).length === 1);
+
+  seedAll(); // reseed + clearEvents, so the counts below are scoped to the session reset
+  const consentBeforeSession = __rows('consent_events').length;
+  r = await call('POST', '/users/' + U2 + '/reset', { session: { email: 'admin@cedrus', jti: 'sess-1' } });
+  check('admin session -> resets NON-allowlisted user (200 reset:true)',
+    r.status === 200 && r.body.reset === true, JSON.stringify(r.body));
+  check('U2 product memory cleared under session auth',
+    __rows('facts').filter((x) => x.user_id === U2).length === 0 &&
+    __rows('reminders').filter((x) => x.user_id === U2).length === 0);
+  check('U2 self row blanked + account rewound', (() => {
+    const self = __rows('people').filter((p) => p.user_id === U2 && p.is_self === true);
+    const acct = __rows('app_users').find((u) => u.id === U2);
+    return self.length === 1 && self[0].name === 'Me' &&
+      acct.onboarding_complete === false && acct.name === null && acct.plan === 'trialing';
+  })());
+  check('CONSENT preserved under the session reset', __rows('consent_events').length === consentBeforeSession);
+  check('NO allowlist-denial event fired for the session reset',
+    eventsNamed('admin.reset_user.denied').length === 0);
+  check('inner audit records authorized_via: admin_session',
+    eventsNamed('admin.reset_user').some((e) => e.outcome === 'accepted' && e.meta && e.meta.authorized_via === 'admin_session'));
+  check('panel audit records session authorization + user_ref',
+    eventsNamed('admin_panel.reset.requested').some((e) =>
+      e.outcome === 'accepted' && e.authorized_via === 'admin_session' && e.user_ref === 'u_' + U2));
 
   println('');
 
