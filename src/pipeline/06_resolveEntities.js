@@ -14,10 +14,11 @@ import { decideResolution } from '../services/entityResolution.js';
 // (HOLD the write + ask "same person, or someone new?") is deferred to Phase 2.
 export async function resolveEntities({ user, parsed, body = '' }) {
   const personByMention = {};
+  const asks = []; // Phase 2a: mentions HELD for a clarification (never merged/created here)
 
   // Priority 0: a crisis/boundary turn extracts and creates nothing. Crisis
   // content must never flow into ordinary storage (safety spec §7).
-  if (parsed._suppressPersistence) return { personByMention };
+  if (parsed._suppressPersistence) return { personByMention, asks };
 
   // One user-scoped read of the existing people (id, name, aliases, relationship,
   // is_self). The band decision is a pure function over this roster.
@@ -31,9 +32,17 @@ export async function resolveEntities({ user, parsed, body = '' }) {
       continue;
     }
 
-    // action 'new' — this also covers the Phase-1 default for a genuinely-ambiguous
-    // mention: create a fresh person rather than guess a merge. create() is
-    // user-scoped (ownership guard).
+    // Phase 2a — action 'ask': a near-match / bare-name / model-ambiguous mention.
+    // HOLD it: do not create and do not map it, so persist() naturally skips its
+    // facts/items (ref → null). The clarification loop enqueues the held write and
+    // asks ONE candidate-listing question (services/clarifications.js).
+    if (verdict.action === 'ask') {
+      asks.push({ mention: p, candidates: verdict.candidates || [], askKind: verdict.askKind });
+      continue;
+    }
+
+    // action 'new' — create a fresh person (no match at all, or a new-person cue).
+    // create() is user-scoped (ownership guard).
     const created = await people.create(user.id, {
       name: p.proposed_name || p.mention_text,
       relationship: p.proposed_relationship || null,
@@ -44,5 +53,5 @@ export async function resolveEntities({ user, parsed, body = '' }) {
     roster.push({ id: created.id, name: created.name, aliases: created.aliases || [], relationship: created.relationship, is_self: false });
   }
 
-  return { personByMention };
+  return { personByMention, asks };
 }

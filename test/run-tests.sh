@@ -125,4 +125,21 @@ OUTB="$(mktemp -t cedrus-tests).js"
 } > "$OUTB"
 run_js "$OUTB"
 
+# ── Bundle 16: clarifications — Phase-2a ask-first dedup loop (state machine) ─
+# Real voiceGuard/entityResolution/people/clarifications run against the doubles;
+# resolveEntities + persist are injected as fakes inside the test.
+section "clarifications loop"
+OUTC="$(mktemp -t cedrus-tests).js"
+{
+  cat test/reliability-core.js
+  echo 'const logger = { warn(){}, info(){}, error(){}, event(){}, addContext(){}, runWithContext:(_,f)=>f() };'
+  strip src/services/voiceGuard.js
+  strip src/services/entityResolution.js
+  strip src/services/people.js
+  echo 'const people = { create, addAlias, listForUser, rename, renameSelf, setRelationship, setBirthday };'
+  strip src/services/clarifications.js
+  cat test/clarifications.test.js
+} > "$OUTC"
+run_js "$OUTC"
+
 printf '\n✅ All test bundles passed.\n'

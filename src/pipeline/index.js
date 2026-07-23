@@ -8,6 +8,8 @@ import { checkRateLimit } from './04_rateLimit.js';
 import { understand } from './05_understand.js';
 import { resolveEntities } from './06_resolveEntities.js';
 import { persist } from './07_persist.js';
+import * as clarifications from '../services/clarifications.js';
+import { isInSuppressionWindow } from '../services/safetyFlags.js';
 
 // ═══════════════ ONBOARDING COPY — EDIT FREELY, NO CODE BELOW CHANGES ═══════════════
 // MSG_COMPLIANCE is byte-identical to the Opt-In Confirmation Response approved in
@@ -105,14 +107,21 @@ export async function runInboundPipeline({ from, body, messageSid, numSegments }
     completionTokens: parsed._usage?.completion_tokens, latencyMs: Date.now() - t0, success: true,
   });
 
-  // STAGE D — resolve entities (Phase-1 confidence bands + create/merge) and write
-  // everything. `body` is threaded through so the resolver can read new-person
-  // phrasing cues ("met a guy named X") off the raw message.
-  const resolved = await resolveEntities({ user, parsed, body });
-  await persist({ user, message, parsed, resolved });
-
-  // STAGE E — reply
-  const reply = parsed.reply || 'Got it.';
+  // STAGE D+E — clarification-aware resolve / persist / reply (Phase 2a,
+  // docs/ENTITY_RESOLUTION_V2.md §2). dispatch() interprets a reply to an active
+  // clarification, resolves THIS message's entities (Phase-1 bands + create/merge),
+  // HOLDS a near-match / bare-name / model-ambiguous mention behind ONE
+  // candidate-listing question, applies the held write on the answer, and composes
+  // the reply. A crisis turn (parsed._suppressPersistence) bypasses all pending
+  // state inside dispatch (never consumes or resolves a clarification); the safety
+  // suppression window gates any user-facing ask/re-ask (§2.3, decisions 5 & 6).
+  const inSuppression = parsed._suppressPersistence
+    ? false
+    : await isInSuppressionWindow(user.id).catch(() => false);
+  const { reply } = await clarifications.dispatch({
+    user, message, parsed, body, inSuppression,
+    deps: { resolveEntities, persist },
+  });
   await messages.logOutbound({ userId: user.id, body: reply, messageType: 'reply' });
   return reply;
 }

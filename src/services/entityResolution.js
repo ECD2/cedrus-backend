@@ -114,6 +114,100 @@ export function classifyMatch(name, people = []) {
   return { kind: 'none', personId: null, candidates: [] };
 }
 
+// ── NEAR-MATCH (docs/ENTITY_RESOLUTION_V2.md §1.5) — the Phase-2 ASK trigger.
+// A mention name that is CLOSE to an existing FIRST name but not exact:
+//   Levenshtein ≤ 2  AND  min(len) ≥ 3  AND  a shared 2-letter prefix.
+// Tuned to catch the Luca/Luka/Lucas/Luc family and to STAY SILENT on genuinely
+// different short names (Jon/Jan, Dan/Don, Sam/Pam). Exact-equal is the exact_name
+// band (silent merge), so it is excluded here. PURE — same inputs, same result.
+const NEAR_MAX_DISTANCE = 2;
+const NEAR_MIN_LEN = 3;
+const NEAR_MIN_PREFIX = 2;
+const NEAR_CANDIDATE_CAP = 3;
+
+// Levenshtein edit distance, short-circuited once it provably exceeds `max`
+// (first names are short, so the DP is tiny).
+export function levenshtein(a, b, max = NEAR_MAX_DISTANCE) {
+  a = String(a || ''); b = String(b || '');
+  if (a === b) return 0;
+  const la = a.length, lb = b.length;
+  if (Math.abs(la - lb) > max) return max + 1;
+  let prev = new Array(lb + 1);
+  for (let j = 0; j <= lb; j++) prev[j] = j;
+  for (let i = 1; i <= la; i++) {
+    const cur = new Array(lb + 1);
+    cur[0] = i;
+    let rowMin = i;
+    for (let j = 1; j <= lb; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const v = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+      cur[j] = v;
+      if (v < rowMin) rowMin = v;
+    }
+    if (rowMin > max) return max + 1; // whole row already over budget
+    prev = cur;
+  }
+  return prev[lb];
+}
+
+function sharedPrefixLen(a, b) {
+  const n = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < n && a[i] === b[i]) i++;
+  return i;
+}
+
+// Is normalized first-name `m` a NEAR-MATCH of normalized first-name `e`? Never true
+// for equal strings (that is the exact band) or names shorter than the min length.
+export function isNearMatch(m, e) {
+  if (!m || !e || m === e) return false;
+  if (Math.min(m.length, e.length) < NEAR_MIN_LEN) return false;
+  if (sharedPrefixLen(m, e) < NEAR_MIN_PREFIX) return false;
+  const d = levenshtein(m, e, NEAR_MAX_DISTANCE);
+  return d >= 1 && d <= NEAR_MAX_DISTANCE;
+}
+
+function candidateView(p, distance) {
+  return {
+    id: p.id,
+    name: p.name,
+    relationship: p.relationship || null,
+    last_contact_at: p.last_contact_at || null,
+    distance,
+  };
+}
+
+// Order per §1.5: edit distance asc, then interaction salience (last_contact_at
+// desc), then name asc; dedup by id (keep the closest); cap at 3.
+export function orderAndCapCandidates(cands) {
+  const byId = new Map();
+  for (const c of cands || []) {
+    if (!c || !c.id) continue;
+    const prev = byId.get(c.id);
+    if (!prev || c.distance < prev.distance) byId.set(c.id, c);
+  }
+  return [...byId.values()].sort((a, b) => {
+    if (a.distance !== b.distance) return a.distance - b.distance;
+    const sa = a.last_contact_at || '', sb = b.last_contact_at || '';
+    if (sa !== sb) return sa < sb ? 1 : -1;          // more recent first
+    return normName(a.name) < normName(b.name) ? -1 : 1;
+  }).slice(0, NEAR_CANDIDATE_CAP);
+}
+
+// Owned, non-self existing people whose FIRST name near-matches `name` (§1.5).
+export function findNearMatches(name, people = []) {
+  const mFirst = firstToken(name);
+  if (!mFirst) return [];
+  const out = [];
+  for (const p of people || []) {
+    if (p.is_self) continue;
+    const eFirst = firstToken(p.name);
+    if (!eFirst || eFirst === mFirst) continue;      // exact-equal → exact_name band
+    if (isNearMatch(mFirst, eFirst)) out.push(candidateView(p, levenshtein(mFirst, eFirst, NEAR_MAX_DISTANCE)));
+  }
+  return orderAndCapCandidates(out);
+}
+
 const MERGEABLE_KINDS = new Set(['exact_name', 'exact_alias', 'nickname']);
 const CONFIDENCE_FLOOR = 0.70;
 
@@ -127,45 +221,110 @@ const CONFIDENCE_FLOOR = 0.70;
 //             proposed_name, mention_text, confidence)
 //   body    = the raw inbound message text (for new-person cue detection)
 //   people  = the user's existing people (listForUser shape)
+// Phase 2a adds a third action, 'ask' — HOLD the write and clarify — for the
+// genuinely-ambiguous cases §1 used to default-create. A verdict is one of:
+//   { action: 'existing', personId, band, reason }
+//   { action: 'new',                band, reason }
+//   { action: 'ask', askKind, newName, candidates:[{id,name,relationship,...}], band, reason }
+// A merge is still AUTOMATIC only on exact name / registered alias / curated
+// nickname with exactly one candidate; a new-person cue still forces CREATE.
 export function decideResolution({ mention = {}, body = '', people = [] } = {}) {
   const roster = people || [];
   const ownedIds = new Set(roster.map((p) => p.id));
+  const byId = new Map(roster.map((p) => [p.id, p]));
   const confidence = typeof mention.confidence === 'number' ? mention.confidence : 1;
+  const name = mention.proposed_name || mention.mention_text || '';
 
-  // 1) The model resolved to an existing/self person BY ID. Honor it only if the id
-  //    is OWNED (cross-tenant guard, WS-A) and confidence clears the floor.
+  // 1) Model resolved to an OWNED existing/self person, confidently → silent merge.
   if ((mention.resolution === 'existing' || mention.resolution === 'self')
       && mention.person_id && ownedIds.has(mention.person_id)
       && confidence >= CONFIDENCE_FLOOR) {
     return { action: 'existing', personId: mention.person_id, band: 'confident_existing', reason: 'model_existing_owned' };
   }
 
-  // 2) Genuinely ambiguous (model surfaced candidates) → Phase 1 default: CREATE.
-  //    Never a guessed merge onto an existing record. (Phase 2 asks instead.)
-  if (mention.resolution === 'ambiguous') {
-    return { action: 'new', band: 'ambiguous_defaulted_new', reason: 'ambiguous_default_create_phase1' };
-  }
-
-  // 3) Resolve by name. A new-person phrasing cue forces CREATE regardless of any
-  //    substring / near overlap with an existing name (the Lucas fix).
-  const name = mention.proposed_name || mention.mention_text || '';
+  // 2) A new-person phrasing cue → confident CREATE. Outranks any near/weak overlap
+  //    with an existing name (the Lucas fix); never an ask, never a merge.
   const cue = hasNewPersonCue([mention.mention_text, body].filter(Boolean).join(' '));
-  if (cue) {
-    return { action: 'new', band: 'confident_new', reason: 'new_person_cue' };
-  }
+  if (cue) return { action: 'new', band: 'confident_new', reason: 'new_person_cue' };
 
-  // Auto-merge ONLY on exact name / exact alias / curated nickname, and only when
-  // there is exactly ONE such candidate. A bare substring NEVER merges.
+  // 3) Exact name / registered alias / curated nickname, exactly ONE → silent merge.
   const match = classifyMatch(name, roster);
   if (MERGEABLE_KINDS.has(match.kind) && match.candidates.length === 1) {
     return { action: 'existing', personId: match.personId, band: 'confident_existing', reason: 'exact_or_nickname_single' };
   }
 
-  // Everything else — substring-only, multiple same-name ties, or no match at all —
-  // DEFAULTS TO CREATE in Phase 1 (these are the cases Phase 2's ask-loop handles).
-  return {
-    action: 'new',
-    band: match.kind === 'none' ? 'confident_new' : 'ambiguous_defaulted_new',
-    reason: match.kind === 'none' ? 'no_match_create' : 'weak_match_default_create',
-  };
+  // 4) The same name/alias/nickname is shared by 2+ owned people → ASK which
+  //    (bare-name disambiguation, §2.4) before attaching anything.
+  if (MERGEABLE_KINDS.has(match.kind) && match.candidates.length >= 2) {
+    const candidates = orderAndCapCandidates(
+      match.candidates.map((id) => byId.get(id)).filter(Boolean).map((p) => candidateView(p, 0)),
+    );
+    return { action: 'ask', askKind: 'bare_name', newName: name, candidates, band: 'ask_bare_name', reason: 'bare_name_multiple' };
+  }
+
+  // 5) A NEAR-MATCH (§1.5) and/or a model-flagged ambiguity over owned people → ASK.
+  const near = findNearMatches(name, roster);
+  const modelAmb = mention.resolution === 'ambiguous'
+    ? (mention.candidate_ids || []).filter((id) => ownedIds.has(id)).map((id) => byId.get(id)).filter(Boolean).map((p) => candidateView(p, 0))
+    : [];
+  const candidates = orderAndCapCandidates([...near, ...modelAmb]);
+  if (candidates.length >= 1) {
+    return { action: 'ask', askKind: 'near_match', newName: name, candidates, band: 'ask_near_match', reason: near.length ? 'near_match' : 'model_ambiguous' };
+  }
+
+  // 6) No match at all → confident create.
+  return { action: 'new', band: 'confident_new', reason: 'no_match_create' };
+}
+
+// ── Deterministic interpretation of a reply to a clarification (§2.4). Model-first
+// with a deterministic backstop is the doc's design; Phase 2a ships the backstop
+// (the model `clarification_answer` field is a documented follow-up). PURE.
+//   clarification = { candidates:[{id,name,relationship,last_initial?}], proposed_name }
+//   → { decision: 'same'|'different'|'unclear', personId? }
+export function interpretClarificationReply(body, clarification = {}) {
+  const t = normName(body);
+  if (!t) return { decision: 'unclear' };
+  const cands = clarification.candidates || [];
+
+  // Explicit "new / different / someone else / no" → create a new person.
+  if (/\b(new|different|someone\s+else|somebody\s+else|another\s+one|neither|not\s+(?:her|him|them|the\s+same))\b/.test(t)
+      || /^(no|nope|nah)\b/.test(t)) {
+    return { decision: 'different' };
+  }
+
+  // Match a specific candidate by first/full name, last-initial letter, relationship
+  // word, or an ordinal. Exactly one hit resolves to 'same'.
+  const hits = [];
+  for (const c of cands) {
+    const cFirst = firstToken(c.name);
+    const cName = normName(c.name);
+    let hit = false;
+    if (cName && (t === cName || t.split(/\s+/).includes(cFirst) || t.includes(cName))) hit = true;
+    const li = normName(c.last_initial).replace(/[.]/g, '');
+    if (li && new RegExp('(^|\\s)' + li + '(\\.|\\b)').test(t)) hit = true;
+    const rel = normName(c.relationship);
+    if (rel && rel.length >= 3 && t.includes(rel)) hit = true;
+    if (hit) hits.push(c);
+  }
+  if (hits.length === 1) return { decision: 'same', personId: hits[0].id };
+
+  const ord = ordinalIndex(t);
+  if (ord != null && ord >= 0 && ord < cands.length) return { decision: 'same', personId: cands[ord].id };
+
+  // Bare affirmation with a single candidate ("yes / same / that's him").
+  if (cands.length === 1 && /\b(yes|yeah|yep|same|correct|right|the\s+same)\b/.test(t)) {
+    return { decision: 'same', personId: cands[0].id };
+  }
+  if (cands.length === 1 && /that'?s\s+(?:him|her|them)/.test(t)) {
+    return { decision: 'same', personId: cands[0].id };
+  }
+
+  return { decision: 'unclear' };
+}
+
+function ordinalIndex(t) {
+  if (/\b(first|1st|number\s*one)\b/.test(t) || /^1\b/.test(t)) return 0;
+  if (/\b(second|2nd|number\s*two)\b/.test(t) || /^2\b/.test(t)) return 1;
+  if (/\b(third|3rd|number\s*three)\b/.test(t) || /^3\b/.test(t)) return 2;
+  return null;
 }
