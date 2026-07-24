@@ -142,6 +142,13 @@
   const qBare = authorQuestion({ askKind: 'bare_name', newName: 'Luca', candidates: [{ name: 'Luca', relationship: 'brother' }, { name: 'Luca', relationship: 'coworker' }] });
   check('bare-name asks which, by relationship tag', /Which Luca/.test(qBare) && /brother/.test(qBare), qBare);
 
+  // Phase 2b: same-first-name candidates carry last_initial -> "Which Luca: C. or M.?"
+  const qBareInit = authorQuestion({ askKind: 'bare_name', newName: 'Luca', candidates: [{ name: 'Luca', last_initial: 'C.', relationship: 'brother' }, { name: 'Luca', last_initial: 'M.', relationship: 'coworker' }] });
+  check('bare-name with last-initials -> "Which Luca: C. or M.?"', /Which Luca: C\. or M\./.test(qBareInit), qBareInit);
+  // near-match candidates that collide on first name disambiguate with the initial
+  const qNearInit = authorQuestion({ askKind: 'near_match', newName: 'Luka', candidates: [{ name: 'Luca', last_initial: 'C.' }, { name: 'Luca', last_initial: 'M.' }] });
+  check('near-match colliding candidates render "Luca C." and "Luca M."', /Luca C\./.test(qNearInit) && /Luca M\./.test(qNearInit), qNearInit);
+
   println('');
   const f = done();
   println(f === 0 ? 'ALL TESTS PASSED' : f + ' TEST(S) FAILED');

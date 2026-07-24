@@ -32,7 +32,7 @@ function requireUser(userId, fn) {
 
 export async function listForUser(userId) {
   const { data } = await supabase.from('people')
-    .select('id, name, aliases, relationship, is_self, last_contact_at')
+    .select('id, name, aliases, relationship, is_self, last_contact_at, last_initial')
     .eq('user_id', userId).eq('is_archived', false);
   return data || [];
 }
@@ -57,9 +57,74 @@ export async function addAlias(userId, personId, alias) {
 export async function create(userId, { name, relationship = null, aliases = [] }) {
   requireUser(userId, 'create');
   const { data, error } = await supabase.from('people')
-    .insert({ user_id: userId, name, relationship, aliases }).select('*').single();
+    .insert({ user_id: userId, name, relationship, aliases, is_archived: false }).select('*').single();
   if (error) throw error;
+  // Phase 2b: lazily derive a last-initial for this person AND its previously-
+  // unlabeled first-name twin the moment a collision is created (docs §3). Mutates
+  // last_initial only — never the name. Best-effort: a failure never blocks create.
+  try { await reconcileFirstNameCollision(userId, data); } catch { /* non-blocking */ }
   return data;
+}
+
+// ── Phase 2b: same-first-name disambiguation (docs/ENTITY_RESOLUTION_V2.md §3) ──
+// last_initial is added by ENTITY_RESOLUTION_LAST_INITIAL.proposed.sql (run via the
+// migration runner BEFORE deploy); this code assumes the nullable column exists.
+const firstNameNorm = (name) => String(name || '').trim().toLowerCase().split(/\s+/)[0] || '';
+const firstNameRaw = (name) => String(name || '').trim().split(/\s+/)[0] || String(name || '');
+
+// A stated surname -> its initial ("Luca Nannini" / "Luca N." -> "N."). No surname
+// token (a first-name-only "Luca") -> null. Never derived from the first name itself.
+export function deriveLastInitial(name) {
+  const tokens = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) return null;
+  const letter = tokens[tokens.length - 1].replace(/[^A-Za-z]/g, '').charAt(0);
+  return letter ? letter.toUpperCase() + '.' : null;
+}
+
+// Ownership-scoped write of the disambiguator (mirrors setRelationship). A foreign
+// person_id is a no-op, never a cross-tenant write.
+export async function setLastInitial(userId, personId, lastInitial) {
+  requireUser(userId, 'setLastInitial');
+  if (!personId || !lastInitial) return;
+  await supabase.from('people').update({ last_initial: lastInitial })
+    .eq('id', personId).eq('user_id', userId);
+}
+
+// On a first-name collision among the user's active, non-self people, derive+store a
+// last_initial for the new person AND any twin that still lacks one (from each one's
+// OWN stated name). No collision -> nothing set (single-"Luca" users stay unlabeled).
+export async function reconcileFirstNameCollision(userId, newPerson) {
+  if (!newPerson || newPerson.is_self) return;
+  const first = firstNameNorm(newPerson.name);
+  if (!first) return;
+  const { data } = await supabase.from('people')
+    .select('id, name, last_initial, is_self, is_archived')
+    .eq('user_id', userId).eq('is_archived', false);
+  const twins = (data || []).filter((p) => p.id !== newPerson.id && !p.is_self && firstNameNorm(p.name) === first);
+  if (!twins.length) return; // no collision → lazy: no label
+  const newInitial = deriveLastInitial(newPerson.name);
+  if (newInitial && !newPerson.last_initial) {
+    await setLastInitial(userId, newPerson.id, newInitial);
+    newPerson.last_initial = newInitial;
+  }
+  for (const t of twins) {
+    if (t.last_initial) continue;
+    const ti = deriveLastInitial(t.name);
+    if (ti) await setLastInitial(userId, t.id, ti);
+  }
+}
+
+// The ONE render helper (docs §3). Returns the plain name when the person's first
+// name is unique among the user's active, non-self people, and "Luca C." only when a
+// same-first-name collision exists (using last_initial when we have it, else the plain
+// first name — the ask then leans on relationship tags). `people` = listForUser shape.
+export function displayName(person, people = []) {
+  if (!person) return '';
+  const first = firstNameRaw(person.name);
+  const fn = firstNameNorm(person.name);
+  const collision = (people || []).some((p) => p && p.id !== person.id && !p.is_self && firstNameNorm(p.name) === fn);
+  if (!collision) return person.name;
+  return person.last_initial ? first + ' ' + person.last_initial : first;
 }
 
 // Rename an existing person (e.g. the user corrected a misheard/misspelled name).

@@ -118,12 +118,13 @@
   const bare = decideResolution({
     mention: { resolution: 'existing', proposed_name: 'Luca', mention_text: 'Luca' },
     body: 'Luca called me', people: [
-      { id: 'lucaC', name: 'Luca', aliases: [], relationship: 'brother', is_self: false },
-      { id: 'lucaM', name: 'Luca', aliases: [], relationship: 'coworker', is_self: false },
+      { id: 'lucaC', name: 'Luca', aliases: [], relationship: 'brother', last_initial: 'C.', is_self: false },
+      { id: 'lucaM', name: 'Luca', aliases: [], relationship: 'coworker', last_initial: 'M.', is_self: false },
     ],
   });
   check('two same-name -> ASK (bare_name)', bare.action === 'ask' && bare.askKind === 'bare_name', JSON.stringify(bare));
   check('both Lucas are candidates', bare.candidates.length === 2);
+  check('Phase 2b: candidates carry last_initial through to the ask', bare.candidates.every((c) => c.last_initial));
 
   println('');
   println('a genuinely different name (Jon vs existing Jan) does NOT ask');
