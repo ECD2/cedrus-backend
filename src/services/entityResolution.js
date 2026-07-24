@@ -315,34 +315,59 @@ export function interpretClarificationReply(body, clarification = {}) {
     return { decision: 'different' };
   }
 
-  // Match a specific candidate by first/full name, last-initial letter, relationship
-  // word, or an ordinal. Exactly one hit resolves to 'same'.
-  const hits = [];
-  for (const c of cands) {
-    const cFirst = firstToken(c.name);
-    const cName = normName(c.name);
-    let hit = false;
-    if (cName && (t === cName || t.split(/\s+/).includes(cFirst) || t.includes(cName))) hit = true;
-    const li = normName(c.last_initial).replace(/[.]/g, '');
-    if (li && new RegExp('(^|\\s)' + li + '(\\.|\\b)').test(t)) hit = true;
-    const rel = normName(c.relationship);
-    if (rel && rel.length >= 3 && t.includes(rel)) hit = true;
-    if (hit) hits.push(c);
-  }
-  if (hits.length === 1) return { decision: 'same', personId: hits[0].id };
+  const words = t.split(/\s+/).filter(Boolean);
 
+  // Tier 1 — DISCRIMINATORS take precedence. When candidates share a first name
+  // ("Luca M." / "Luca N."), the shared first name is NON-identifying; only a
+  // last-initial, a surname token, or a relationship word tells them apart. So
+  // "Luca N" (and "N", "Luca N.", "Nannini") resolves uniquely to the N. candidate,
+  // even though "Luca" alone matches both. Exactly one discriminator hit → same.
+  const discHits = cands.filter((c) => matchesDiscriminator(t, words, c));
+  if (discHits.length === 1) return { decision: 'same', personId: discHits[0].id };
+
+  // Ordinal ("first" / "the second one").
   const ord = ordinalIndex(t);
   if (ord != null && ord >= 0 && ord < cands.length) return { decision: 'same', personId: cands[ord].id };
 
+  // Tier 2 — NAME match, used ONLY when it uniquely identifies a candidate. A bare
+  // first name shared by 2+ candidates is non-identifying and must NOT resolve to a
+  // guess (it falls through to 'unclear' → re-ask); a distinct first name or a full
+  // name still resolves, so a single-candidate "Luca" reply keeps working.
+  const nameHits = cands.filter((c) => matchesName(t, words, c));
+  if (nameHits.length === 1) return { decision: 'same', personId: nameHits[0].id };
+
   // Bare affirmation with a single candidate ("yes / same / that's him").
-  if (cands.length === 1 && /\b(yes|yeah|yep|same|correct|right|the\s+same)\b/.test(t)) {
-    return { decision: 'same', personId: cands[0].id };
-  }
-  if (cands.length === 1 && /that'?s\s+(?:him|her|them)/.test(t)) {
+  if (cands.length === 1 && (/\b(yes|yeah|yep|same|correct|right|the\s+same)\b/.test(t) || /that'?s\s+(?:him|her|them)/.test(t))) {
     return { decision: 'same', personId: cands[0].id };
   }
 
   return { decision: 'unclear' };
+}
+
+// A DISCRIMINATOR uniquely names a candidate among same-first-name siblings: its
+// last-initial letter (a standalone token, or the "N." form), a surname token from
+// its stored name ("Luca Nannini" → "nannini"), or a relationship word. PURE.
+function matchesDiscriminator(t, words, c) {
+  const bare = words.map((w) => w.replace(/[.]/g, '')); // "n." -> "n"
+  const li = normName(c.last_initial).replace(/[.]/g, '');
+  if (li && bare.includes(li)) return true;
+  const tokens = normName(c.name).split(/\s+/).filter(Boolean);
+  if (tokens.length >= 2) {
+    const surname = tokens[tokens.length - 1].replace(/[.]/g, '');
+    if (surname && surname.length >= 2 && bare.includes(surname)) return true;
+  }
+  const rel = normName(c.relationship);
+  if (rel && rel.length >= 3 && t.includes(rel)) return true;
+  return false;
+}
+
+// A NAME match: the reply contains the candidate's first-name token, or its full
+// name. Deliberately non-identifying when 2+ candidates share the first name — the
+// caller requires EXACTLY ONE nameHit, so a shared first name resolves nothing. PURE.
+function matchesName(t, words, c) {
+  const cFirst = firstToken(c.name);
+  const cName = normName(c.name);
+  return !!((cFirst && words.includes(cFirst)) || (cName && t.includes(cName)));
 }
 
 function ordinalIndex(t) {

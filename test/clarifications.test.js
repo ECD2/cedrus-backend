@@ -149,6 +149,49 @@
   const qNearInit = authorQuestion({ askKind: 'near_match', newName: 'Luka', candidates: [{ name: 'Luca', last_initial: 'C.' }, { name: 'Luca', last_initial: 'M.' }] });
   check('near-match colliding candidates render "Luca C." and "Luca M."', /Luca C\./.test(qNearInit) && /Luca M\./.test(qNearInit), qNearInit);
 
+  // ── ANSWER-MATCHER + FALLBACK FIX (2026-07-24) ──────────────────────────────
+  const twoLucaPeople = () => [
+    { id: 'lm', user_id: U, name: 'Luca Moretti', last_initial: 'M.', is_self: false },
+    { id: 'ln', user_id: U, name: 'Luca Nannini', last_initial: 'N.', is_self: false },
+  ];
+  const activeLuca = () => ({
+    id: 'c-luca', user_id: U, status: 'active', proposed_name: 'Luca', reask_count: 0,
+    question_text: 'Quick check: is Luca a new person, or do you mean Luca M. or Luca N.?',
+    held_payload: { clarify: { askKind: 'bare_name', newName: 'Luca', candidates: [{ id: 'lm', name: 'Luca Moretti', last_initial: 'M.' }, { id: 'ln', name: 'Luca Nannini', last_initial: 'N.' }] },
+      writes: { source_message_id: 'm0', person: { mention_text: 'Luca' }, facts: [], saved_items: [{ person_ref: 'Luca', title: 'Had lunch with Luca' }], reminders: [], goals: [], birthdays: [] } },
+  });
+  const bareReply = (b) => ({ user, message: { id: 'mX' }, parsed: { reply: 'ok', people: [{ mention_text: b }], facts: [], saved_items: [{ person_ref: b, title: 'x' }], reminders: [], goals: [], birthdays: [] }, body: b, inSuppression: false, deps });
+
+  println('');
+  println('dispatch: "Luca N" resolves the active bare-name pending to Luca N.');
+  __reset(); seedPeople(twoLucaPeople()); __seed('pending_clarifications', [activeLuca()]);
+  persistCalls = []; nextAsks = [nearAsk()]; // would fire iff STEP 2 wrongly reprocessed
+  const dN = await dispatch(bareReply('Luca N'));
+  check('"Luca N" resolves the pending as same -> Luca N.', __rows('pending_clarifications')[0].resolution === 'same' && __rows('pending_clarifications')[0].resolved_person_id === 'ln');
+  check('reply confirms save to Luca', /added that to Luca/.test(dN.reply), dN.reply);
+  check('the HELD "Had lunch with Luca" applied to Luca N.', persistCalls.some((c) => (c.resolved.personByMention || {}).Luca === 'ln'));
+  check('no reprocess: still exactly one pending row', __rows('pending_clarifications').length === 1);
+
+  println('dispatch: an UNCLEAR reply re-asks the SAME pending — no duplicate item, no 2nd pending');
+  __reset(); seedPeople(twoLucaPeople()); __seed('pending_clarifications', [activeLuca()]);
+  persistCalls = []; nextAsks = [nearAsk()];
+  const dUn = await dispatch(bareReply('hmm not sure'));
+  check('re-asks the SAME question', dUn.reply.includes('do you mean Luca M. or Luca N.'), dUn.reply);
+  check('no fresh reprocess: persist NOT called', persistCalls.length === 0);
+  check('NO second pending created', __rows('pending_clarifications').length === 1);
+  check('pending stays active, reask bumped to 1', __rows('pending_clarifications')[0].status === 'active' && __rows('pending_clarifications')[0].reask_count === 1);
+
+  println('dispatch: reask exhaustion resolves the pending (cancelled) — not stuck, no duplicate person');
+  __reset(); seedPeople(twoLucaPeople());
+  const ex = activeLuca(); ex.reask_count = 1; // already re-asked once
+  __seed('pending_clarifications', [ex]);
+  persistCalls = []; const before = __rows('people').length;
+  await dispatch(bareReply('not sure'));
+  check('reask-exhausted -> pending is NOT left active', __rows('pending_clarifications')[0].status !== 'active');
+  check('resolution recorded as cancelled', __rows('pending_clarifications')[0].resolution === 'cancelled');
+  check('NO duplicate person created', __rows('people').length === before);
+  check('the dropped hold was not applied (no persist)', persistCalls.length === 0);
+
   println('');
   const f = done();
   println(f === 0 ? 'ALL TESTS PASSED' : f + ' TEST(S) FAILED');
