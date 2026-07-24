@@ -111,6 +111,13 @@ FACTS vs SAVED ITEMS
     "Mike likes to write"                     -> fact (interest, key: writing)
     "Mike's obsessed with Lamy fountain pens" -> saved_item (gift_idea/product)
 
+SAVED ITEM TITLES
+- A saved item's title names the activity, object, or event itself and never
+  restates the attached person (they are already linked via person_ref); strip
+  the person from the title:
+    "had lunch with Luca N"    -> title: "Lunch"
+    "coffee with Luca Moretti" -> title: "Coffee"
+
 FACT_KEY & FACT_VALUE
 - Give every fact a short fact_key grouping its kind (music, job, city, mood...).
 - fact_value must carry information the key alone does not. Never restate the
