@@ -10,6 +10,7 @@ import { resolveEntities } from './06_resolveEntities.js';
 import { persist } from './07_persist.js';
 import * as clarifications from '../services/clarifications.js';
 import { isInSuppressionWindow } from '../services/safetyFlags.js';
+import { extractSelfName, bareName } from './selfName.js';
 
 // ═══════════════ ONBOARDING COPY — EDIT FREELY, NO CODE BELOW CHANGES ═══════════════
 // MSG_COMPLIANCE is byte-identical to the Opt-In Confirmation Response approved in
@@ -64,15 +65,27 @@ export async function runInboundPipeline({ from, body, messageSid, numSegments }
   // nothing yet for the AI to extract - ask the follow-up instead of wasting
   // a model call on an empty message.
   if (!user.onboarding_complete) {
-    const name = extractFirstName(body);
-    const wordCount = body.trim().split(/\s+/).filter(Boolean).length;
-    const justAName = !!name && wordCount <= 2;
+    // The prompt above asked "who's someone important in your life?", so this
+    // reply is about SOMEONE ELSE. Only capture the user's OWN name when the
+    // reply is an explicit self-introduction ("I'm Emil", "my name is Emil");
+    // otherwise leave the self-name blank rather than grabbing a stray leading
+    // token like "My" (from "My wife Sarah") or "Grabbed" (from "Grabbed drinks
+    // with Dave"). selfName drives the DB write; loneName only decides whether
+    // there's anything for the model to extract yet.
+    const selfName = extractSelfName(body);
+    const loneName = bareName(body);
 
-    await users.markOnboarded(user.id, name ? { name } : {});
-    if (name) await people.renameSelf(user.id, name);
+    await users.markOnboarded(user.id, selfName ? { name: selfName } : {});
+    if (selfName) await people.renameSelf(user.id, selfName);
 
-    if (justAName) {
-      const reply = `Good to meet you, ${name}. So - tell me about someone important in your life. A birthday, something they're into, anything worth remembering.`;
+    // A reply that is essentially just a name has nothing for the model to
+    // extract yet - ask the onboarding follow-up instead of spending a model
+    // call. Greet them by name only when they actually gave their OWN name; a
+    // bare name (probably the important person, not the user) gets a neutral ack.
+    if (loneName) {
+      const reply = selfName
+        ? `Good to meet you, ${selfName}. So - tell me about someone important in your life. A birthday, something they're into, anything worth remembering.`
+        : `Got it. Tell me a bit more - a birthday, something they're into, or anything else worth remembering.`;
       await messages.logOutbound({ userId: user.id, body: reply, messageType: 'onboarding' });
       return reply;
     }
@@ -124,15 +137,4 @@ export async function runInboundPipeline({ from, body, messageSid, numSegments }
   });
   await messages.logOutbound({ userId: user.id, body: reply, messageType: 'reply' });
   return reply;
-}
-
-// Pull a plausible first name out of "Emil", "I'm Emil", "hey, my name is emil", etc.
-function extractFirstName(body) {
-  const cleaned = String(body || '').trim()
-    .replace(/^(hi|hey|hello|yo|sup)[,!. ]*/i, '')
-    .replace(/^(i am|i'm|im|it's|its|my name is|my name's|this is|name's|call me)\s+/i, '');
-  const m = /^([A-Za-z][A-Za-z'-]{1,20})/.exec(cleaned);
-  if (!m) return null;
-  const n = m[1];
-  return n.charAt(0).toUpperCase() + n.slice(1);
 }
