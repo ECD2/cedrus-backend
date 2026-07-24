@@ -26,13 +26,15 @@
   check('ASK did not merge into Luca', lucasNoCue.personId === undefined);
   check('ASK lists Luca as a candidate', (lucasNoCue.candidates || []).some((c) => c.id === 'luca'));
 
-  println('"Luka" typo the model itself resolved to existing Luca DOES merge');
+  println('THE FIX: "Luka" the model confidently resolved to existing Luca now ASKS (near-miss over confidence)');
   const luka = decideResolution({
     mention: { resolution: 'existing', person_id: 'luca', mention_text: 'Luka', confidence: 0.95 },
     body: "Luka's thinking about moving to Austin next year.",
     people: roster,
   });
-  check('Luka merges to Luca', luka.action === 'existing' && luka.personId === 'luca', JSON.stringify(luka));
+  check('confident model-existing on a near-miss spelling -> ASK, not a silent merge', luka.action === 'ask', JSON.stringify(luka));
+  check("the ask lists the model's pick Luca as a candidate", (luka.candidates || []).some((c) => c.id === 'luca'));
+  check('the ask did NOT silently merge', luka.personId === undefined);
 
   println('Phase 2a: model "ambiguous" but the name EXACTLY matches one person -> merge (exact single wins)');
   const amb = decideResolution({
@@ -157,6 +159,46 @@
     const r = interpretClarificationReply('my brother', { candidates: [{ id: 'b', name: 'Luca', relationship: 'brother' }, { id: 'c', name: 'Luca', relationship: 'coworker' }] });
     return r.decision === 'same' && r.personId === 'b';
   })());
+
+  // ── THE FIX (2026-07-24): a near-miss spelling beats a confident model "existing" ──
+  println('');
+  println('near-miss over model confidence: a confident model-existing TYPO asks; exact/alias still merge');
+  const twoLucasFix = [
+    { id: 'luca', name: 'Luca', aliases: [], relationship: 'brother', is_self: false },
+    { id: 'lucas', name: 'Lucas', aliases: [], relationship: 'coworker', is_self: false },
+  ];
+  // (1) model existing=Luca @0.90 on "Luka", Luca+Lucas on file -> ASK listing BOTH (not merge)
+  const fix1 = decideResolution({
+    mention: { resolution: 'existing', person_id: 'luca', mention_text: 'Luka', confidence: 0.90 },
+    body: 'Grabbed lunch with Luka today', people: twoLucasFix,
+  });
+  check('confident existing=Luca on "Luka" -> ASK, not a silent merge', fix1.action === 'ask', JSON.stringify(fix1));
+  check('the ask lists BOTH Luca and Lucas', fix1.candidates.map((c) => c.id).sort().join(',') === 'luca,lucas');
+  check('the model pick Luca is among the candidates', fix1.candidates.some((c) => c.id === 'luca'));
+  // (2) "Luca" exact, model existing=Luca -> silent merge (unchanged)
+  const fix2 = decideResolution({
+    mention: { resolution: 'existing', person_id: 'luca', mention_text: 'Luca', confidence: 0.90 },
+    body: 'Luca called', people: twoLucasFix,
+  });
+  check('exact-name model-existing -> silent merge', fix2.action === 'existing' && fix2.personId === 'luca', JSON.stringify(fix2));
+  // (3) "Luka" with ONLY Luca on file -> ASK "new or Luca?"
+  const fix3 = decideResolution({
+    mention: { resolution: 'existing', person_id: 'luca', mention_text: 'Luka', confidence: 0.95 },
+    body: 'Luka moved', people: [{ id: 'luca', name: 'Luca', aliases: [], is_self: false }],
+  });
+  check('near-miss with a single Luca -> ASK "new or Luca?"', fix3.action === 'ask' && fix3.candidates.length === 1 && fix3.candidates[0].id === 'luca', JSON.stringify(fix3));
+  // (4) "Luka" is a REGISTERED ALIAS of Luca -> still silent merge (no over-ask)
+  const fix4 = decideResolution({
+    mention: { resolution: 'existing', person_id: 'luca', mention_text: 'Luka', confidence: 0.90 },
+    body: 'Luka texted', people: [{ id: 'luca', name: 'Luca', aliases: ['Luka'], is_self: false }, { id: 'lucas', name: 'Lucas', aliases: [], is_self: false }],
+  });
+  check('registered alias "Luka"->Luca still merges silently (no over-ask)', fix4.action === 'existing' && fix4.personId === 'luca', JSON.stringify(fix4));
+  // (5) confident existing to a DIFFERENT-spelled person with NO near sibling -> trust the model
+  const fix5 = decideResolution({
+    mention: { resolution: 'existing', person_id: 'luca', mention_text: 'Beto', confidence: 0.90 },
+    body: 'my brother Beto says hi', people: [{ id: 'luca', name: 'Luca', aliases: [], relationship: 'brother', is_self: false }],
+  });
+  check('confident existing, unrelated name, no near sibling -> trust merge (not a typo)', fix5.action === 'existing' && fix5.personId === 'luca', JSON.stringify(fix5));
 
   println('');
   const f = done();
