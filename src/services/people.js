@@ -32,9 +32,26 @@ function requireUser(userId, fn) {
 
 export async function listForUser(userId) {
   const { data } = await supabase.from('people')
-    .select('id, name, aliases, relationship, is_self')
+    .select('id, name, aliases, relationship, is_self, last_contact_at')
     .eq('user_id', userId).eq('is_archived', false);
   return data || [];
+}
+
+// Add a spelling as an alias so a future identical mention resolves by exact-alias
+// match and never re-triggers a dedup question (docs §2.5 — the "same" not-duplicate
+// path). Scoped by user_id (ownership guard); a foreign person_id is a no-op. Idempotent.
+export async function addAlias(userId, personId, alias) {
+  requireUser(userId, 'addAlias');
+  const a = String(alias || '').trim();
+  if (!personId || !a) return;
+  const { data } = await supabase.from('people')
+    .select('aliases').eq('id', personId).eq('user_id', userId).maybeSingle();
+  if (!data) return; // person isn't this user's — refuse silently
+  const current = Array.isArray(data.aliases) ? data.aliases : [];
+  if (current.some((s) => String(s).toLowerCase() === a.toLowerCase())) return; // already present
+  if (a.toLowerCase() === '') return;
+  await supabase.from('people').update({ aliases: [...current, a] })
+    .eq('id', personId).eq('user_id', userId);
 }
 
 export async function create(userId, { name, relationship = null, aliases = [] }) {
