@@ -201,6 +201,25 @@
   });
   check('confident existing, unrelated name, no near sibling -> trust merge (not a typo)', fix5.action === 'existing' && fix5.personId === 'luca', JSON.stringify(fix5));
 
+  // ── ANSWER-MATCHER FIX (2026-07-24): discriminators beat a shared first name ──
+  println('');
+  println('interpret: "Luca N" & friends resolve to the N. candidate (shared first name Luca)');
+  const twoLucasFull = { candidates: [
+    { id: 'lm', name: 'Luca Moretti', last_initial: 'M.', relationship: 'coworker' },
+    { id: 'ln', name: 'Luca Nannini', last_initial: 'N.', relationship: 'brother' },
+  ] };
+  const R = (b) => interpretClarificationReply(b, twoLucasFull);
+  check('"Luca N" -> same, Luca N. (not unclear)', R('Luca N').decision === 'same' && R('Luca N').personId === 'ln', JSON.stringify(R('Luca N')));
+  check('"N" -> Luca N.', R('N').personId === 'ln');
+  check('"Luca N." -> Luca N.', R('Luca N.').personId === 'ln');
+  check('"Nannini" -> Luca N.', R('Nannini').personId === 'ln');
+  check('"the second one" -> Luca N. (ordinal)', R('the second one').personId === 'ln');
+  check('"Luca M" -> Luca M.', R('Luca M').personId === 'lm');
+  check('a relationship word "my brother" -> Luca N.', R('my brother').personId === 'ln');
+  check('bare "Luca" (no discriminator) -> unclear (genuinely ambiguous)', R('Luca').decision === 'unclear');
+  check('"new" still -> different', R('new').decision === 'different');
+  check('single candidate, plain "Luca" still resolves', interpretClarificationReply('Luca', { candidates: [{ id: 'solo', name: 'Luca' }] }).personId === 'solo');
+
   println('');
   const f = done();
   println(f === 0 ? 'ALL TESTS PASSED' : f + ' TEST(S) FAILED');

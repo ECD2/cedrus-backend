@@ -94,6 +94,11 @@ function confirmSame(clarify, personId) {
 function confirmDifferent(newName) {
   return sanitize('Got it, saved ' + firstNameOf(newName) + ' as someone new.');
 }
+// Reask-exhausted: we could not tell which person and refuse to guess a merge or
+// spawn a duplicate, so we drop the ambiguous hold with a gentle nudge to re-send.
+function confirmCancelled() {
+  return sanitize("No worries, I'll skip that one for now. Send their full name and I can save it.");
+}
 
 // One reply, one optional question. Preserve the question whole; trim the head first
 // if the 2-segment budget is tight (§2.4).
@@ -217,9 +222,10 @@ export async function dispatch({ user, message, parsed, body, inSuppression = fa
 
   const { resolveEntities, persist } = deps;
   let confirmation = null;
-  let handledAsAnswer = false;
+  let resolvedActive = false;   // the active pending was resolved this turn
+  let reAskQuestion = null;     // re-asking the SAME active pending (unclear, not exhausted)
 
-  // STEP 1 — interpret THIS message as an answer to the active clarification.
+  // STEP 1 — a live pending OWNS this turn: interpret the reply as ITS answer.
   const active = await getActive(user.id);
   if (active) {
     const clarify = (active.held_payload && active.held_payload.clarify) || {};
@@ -229,19 +235,33 @@ export async function dispatch({ user, message, parsed, body, inSuppression = fa
       await people.addAlias(user.id, interp.personId, active.proposed_name); // never re-ask this spelling
       await resolveRow(active.id, user.id, { resolution: 'same', resolvedPersonId: interp.personId, answeredMessageId: message.id });
       confirmation = confirmSame(clarify, interp.personId);
-      handledAsAnswer = true;
+      resolvedActive = true;
     } else if (interp.decision === 'different') {
       const created = await people.create(user.id, { name: active.proposed_name, relationship: active.proposed_relationship || null });
       await applyHeldWrites({ user, personId: created.id, held: active.held_payload, persist });
       await resolveRow(active.id, user.id, { resolution: 'different', resolvedPersonId: created.id, answeredMessageId: message.id });
       confirmation = confirmDifferent(active.proposed_name);
-      handledAsAnswer = true;
+      resolvedActive = true;
+    } else if ((active.reask_count || 0) < 1) {
+      // Unclear, first miss → re-ask the SAME question. The reply is NOT reprocessed
+      // as fresh content (STEP 2 is skipped while a pending is active), so it can
+      // never spawn a duplicate item or a second pending. Suppression-window aware.
+      if (!inSuppression) { await bumpReask(active, user.id); reAskQuestion = active.question_text; }
+    } else {
+      // Unclear + re-ask exhausted → resolve deterministically WITHOUT a guessed merge
+      // and WITHOUT a duplicate person: cancel the hold (drop the ambiguous write) so
+      // the pending is not left stuck active and the expiry sweep never default-creates
+      // a duplicate from it. One graceful, voice-safe nudge to re-send a full name.
+      await resolveRow(active.id, user.id, { resolution: 'cancelled', answeredMessageId: message.id });
+      confirmation = confirmCancelled();
+      resolvedActive = true;
     }
-    // else 'unclear' → fall through: process this message normally + re-ask once.
   }
 
-  // STEP 2 — resolve THIS message's entities (skip when it was purely the answer).
-  if (!handledAsAnswer && resolveEntities) {
+  // STEP 2 — fresh content is processed ONLY when NO pending was awaiting an answer.
+  // While a pending is active, THIS reply is its answer, never a new near-match
+  // message — so an unclear answer can never spawn a duplicate item or a second pending.
+  if (!active && resolveEntities) {
     const resolved = await resolveEntities({ user, parsed, body });
     if (persist) await persist({ user, message, parsed, resolved });
     for (const ask of resolved.asks || []) {
@@ -252,17 +272,12 @@ export async function dispatch({ user, message, parsed, body, inSuppression = fa
     }
   }
 
-  // STEP 3 — ONE reply, at most ONE question, suppression-aware (decisions 5 & 6).
-  let question = null;
-  if (!inSuppression) {
-    if (active && !handledAsAnswer) {
-      // active question still open + reply was unclear → one gentle re-ask.
-      if ((active.reask_count || 0) < 1) { await bumpReask(active, user.id); question = active.question_text; }
-    } else {
-      // nothing active now → activate the FIFO-next held item and ask it.
-      const next = await activateNext(user.id, { askedMessageId: message.id });
-      if (next) question = next.question;
-    }
+  // STEP 3 — ONE reply, at most ONE question (decisions 5 & 6). A re-ask of the same
+  // pending wins; otherwise, once nothing is active, activate the FIFO-next held item.
+  let question = reAskQuestion;
+  if (!question && !inSuppression && (resolvedActive || !active)) {
+    const next = await activateNext(user.id, { askedMessageId: message.id });
+    if (next) question = next.question;
   }
   return { reply: composeReply({ base, confirmation, question }) };
 }
