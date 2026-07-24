@@ -63,7 +63,11 @@ export async function buildContext(user) {
     getOpenPrompts(user.id),
     getRecentMessages(user.id, 6),
   ]);
-  return { people: peopleList, openPrompts, recentMessages };
+  // Phase 2b (docs §3): attach a collision-aware display_name so the model's KNOWN
+  // PEOPLE block distinguishes same-first-name people ("Luca C." vs "Luca M.") and
+  // resolves a mention to the right id. The canonical `name` is left untouched.
+  const withDisplay = (peopleList || []).map((p) => ({ ...p, display_name: people.displayName(p, peopleList) }));
+  return { people: withDisplay, openPrompts, recentMessages };
 }
 
 async function getOpenPrompts(userId) {

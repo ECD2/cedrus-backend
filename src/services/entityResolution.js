@@ -173,6 +173,7 @@ function candidateView(p, distance) {
     name: p.name,
     relationship: p.relationship || null,
     last_contact_at: p.last_contact_at || null,
+    last_initial: p.last_initial || null, // Phase 2b: carried through to the ask + interpret
     distance,
   };
 }

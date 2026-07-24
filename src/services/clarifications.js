@@ -41,6 +41,15 @@ function relTag(c, i) {
   return ['the first', 'the second', 'the third'][i] || ('option ' + (i + 1));
 }
 
+// Phase 2b: render a candidate as "Luca C." when it collides on first name with
+// another candidate and we have its last-initial (docs §3 displayName, list-scoped);
+// otherwise just the first name.
+function labelCandidate(c, all) {
+  const first = firstNameOf(c.name);
+  const collides = (all || []).some((o) => o !== c && firstNameOf(o.name).toLowerCase() === first.toLowerCase());
+  return collides && c.last_initial ? first + ' ' + c.last_initial : first;
+}
+
 function sanitize(s) {
   let out = String(s || '')
     .replace(/[‒–—―]/g, ', ') // em/en/figure/horizontal-bar dash → comma
@@ -62,9 +71,12 @@ export function authorQuestion({ askKind, newName, candidates = [] } = {}) {
   const first = firstNameOf(newName);
   let raw;
   if (askKind === 'bare_name') {
-    raw = 'Which ' + first + ': ' + orList(candidates.map((c, i) => relTag(c, i))) + '?';
+    // "Which Luca: C. or M.?" when both have a last-initial; else fall back to a
+    // relationship / positional tag ("your brother, or from work?") — §2.4/§3.
+    const tags = candidates.map((c, i) => c.last_initial || relTag(c, i));
+    raw = 'Which ' + first + ': ' + orList(tags) + '?';
   } else {
-    const names = candidates.map((c) => firstNameOf(c.name));
+    const names = candidates.map((c) => labelCandidate(c, candidates));
     raw = (first.length <= 3)
       ? 'Did you mean ' + orList(names) + '?'
       : 'Quick check: is ' + first + ' a new person, or do you mean ' + orList(names) + '?';
@@ -104,7 +116,8 @@ export function buildHeldPayload({ parsed, mention, candidates, askKind, sourceM
       askKind,
       newName: mention.proposed_name || mt,
       candidates: (candidates || []).map((c) => ({
-        id: c.id, name: c.name, relationship: c.relationship || null, last_contact_at: c.last_contact_at || null,
+        id: c.id, name: c.name, relationship: c.relationship || null,
+        last_contact_at: c.last_contact_at || null, last_initial: c.last_initial || null,
       })),
     },
     writes: {
