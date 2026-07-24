@@ -235,10 +235,32 @@ export function decideResolution({ mention = {}, body = '', people = [] } = {}) 
   const confidence = typeof mention.confidence === 'number' ? mention.confidence : 1;
   const name = mention.proposed_name || mention.mention_text || '';
 
-  // 1) Model resolved to an OWNED existing/self person, confidently → silent merge.
+  // 1) Model resolved to an OWNED existing/self person, confidently. Trust it as a
+  //    SILENT merge only when the mention actually NAMES that person — an exact name,
+  //    a registered alias, or a curated nickname. If the mention is merely a near-miss
+  //    SPELLING of the resolved person ("Luka" vs "Luca") and other near-matches exist,
+  //    a confident model verdict is exactly the typo-merge Phase 2a must catch — so we
+  //    ASK instead, listing the model's pick alongside the other near candidates. The
+  //    confidence floor is deliberately NOT the lever (0.90 is genuinely high): the lever
+  //    is "near-miss spelling ⇒ ask regardless of model confidence" (diagnosis 2026-07-24).
+  //    A confident existing whose name is unrelated (resolved by context/relationship,
+  //    no near sibling) is not a typo-merge and is still trusted.
   if ((mention.resolution === 'existing' || mention.resolution === 'self')
       && mention.person_id && ownedIds.has(mention.person_id)
       && confidence >= CONFIDENCE_FLOOR) {
+    const resolvedPerson = byId.get(mention.person_id);
+    const namesResolvedPerson = MERGEABLE_KINDS.has(classifyMatch(name, [resolvedPerson]).kind);
+    if (namesResolvedPerson) {
+      return { action: 'existing', personId: mention.person_id, band: 'confident_existing', reason: 'model_existing_owned' };
+    }
+    const nearToModelPick = findNearMatches(name, roster);
+    if (nearToModelPick.length >= 1) {
+      const candidates = orderAndCapCandidates([
+        candidateView(resolvedPerson, levenshtein(firstToken(name), firstToken(resolvedPerson.name), NEAR_MAX_DISTANCE)),
+        ...nearToModelPick,
+      ]);
+      return { action: 'ask', askKind: 'near_match', newName: name, candidates, band: 'ask_near_match', reason: 'near_miss_over_model_existing' };
+    }
     return { action: 'existing', personId: mention.person_id, band: 'confident_existing', reason: 'model_existing_owned' };
   }
 
