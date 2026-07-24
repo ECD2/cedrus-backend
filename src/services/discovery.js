@@ -361,8 +361,18 @@ export async function gatherDiscoverySignals(user, opts = {}, deps = {}) {
   const getAgentContext = deps.getAgentContext || people.getAgentContext;
   const getUserLocation = deps.getUserLocation || defaultUserLocation;
 
+  // A missing or erroring interests table must not sink the whole plan: degrade
+  // to no interests and let goals / people / location still drive it, exactly as
+  // the brief engine does (briefEngine.gatherBriefProfile). Scoped to interests
+  // on purpose — it is the known-not-yet-created table (its N5 foundation
+  // migration is unrun; see docs/INTERESTS.proposed.sql). The other reads hit
+  // long-established tables and keep their throw-on-failure behavior.
+  const readInterests = async (u) => {
+    try { return await getInterests(u); } catch { return []; }
+  };
+
   const [interests, goals, birthdays, context, profileLoc] = await Promise.all([
-    getInterests(user), getOpenGoals(user.id), getBirthdays(user.id),
+    readInterests(user), getOpenGoals(user.id), getBirthdays(user.id),
     getAgentContext(user.id), getUserLocation(user),
   ]);
   const location = resolveLocation({ optsLocation: opts.location, profileLoc, interests });
