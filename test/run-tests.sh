@@ -142,4 +142,20 @@ OUTC="$(mktemp -t cedrus-tests).js"
 } > "$OUTC"
 run_js "$OUTC"
 
+# ── Bundle 17: model-fed timestamp normalization (event_date/trigger_at/due_at) ─
+# Real memory.js/people.js/persist.js: a natural-language model date drops to null and
+# the memory is still saved (the 22007 fix); a NOT-NULL reminder time is refused.
+section "model timestamp normalization"
+OUTT="$(mktemp -t cedrus-tests).js"
+{
+  cat test/stubs.js
+  strip src/services/memory.js
+  echo 'const memory = { addFact, canonicalFactKey, addSavedItem, addReminder, addGoal, toTimestamptz };'
+  strip src/services/people.js
+  echo 'const people = { rename, setRelationship, setBirthday };'
+  strip src/pipeline/07_persist.js
+  cat test/model-timestamps.test.js
+} > "$OUTT"
+run_js "$OUTT"
+
 printf '\n✅ All test bundles passed.\n'

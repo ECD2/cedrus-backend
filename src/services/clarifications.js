@@ -23,6 +23,21 @@ const REPLY_CHAR_CAP = 320;                 // matches understand()'s reply cap
 function nowIso() { return new Date().toISOString(); }
 function ttlIso() { return new Date(Date.now() + CLARIFICATION_TTL_HOURS * 3600 * 1000).toISOString(); }
 
+// Unmask a swallowed Supabase error: surface message + SQLSTATE code (+ constraint /
+// detail) instead of String(err)'s "[object Object]". This module dropped every DB
+// error silently, so any enqueue / clarification-write failure was invisible in the
+// logs. Every DB op below now logs the real SQLSTATE, so the actual cause is diagnosable.
+function errText(err) {
+  if (!err) return 'unknown error';
+  const parts = [err.message || String(err)];
+  if (err.code) parts.push('code=' + err.code);
+  if (err.constraint) parts.push('constraint=' + err.constraint);
+  const detail = err.details || err.detail;
+  if (detail) parts.push('detail=' + detail);
+  if (err.hint) parts.push('hint=' + err.hint);
+  return parts.join(' ');
+}
+
 // ── Question authoring (deterministic; EN — ES is a documented follow-up, §7).
 // No em dash, no exclamation — enforced HERE (applyVoiceGuard's 'routine' band
 // leaves them), then passed through applyVoiceGuard as the house backstop.
@@ -160,13 +175,14 @@ export async function applyHeldWrites({ user, personId, held, persist }) {
   const resolved = { personByMention: mt ? { [mt]: personId } : {} };
   try {
     await persist({ user, message: { id: w.source_message_id || null }, parsed, resolved });
-  } catch (err) { logger.warn('clarifications.applyHeldWrites failed', String(err)); }
+  } catch (err) { logger.warn('clarifications.applyHeldWrites failed', errText(err)); }
 }
 
 // ── State machine (pending_clarifications) ─────────────────────────────────
 export async function getActive(userId) {
-  const { data } = await supabase.from(TABLE).select('*')
+  const { data, error } = await supabase.from(TABLE).select('*')
     .eq('user_id', userId).eq('status', 'active').maybeSingle();
+  if (error) logger.warn('clarifications.getActive failed', errText(error));
   return data || null;
 }
 
@@ -181,7 +197,7 @@ export async function enqueue({ userId, mention, candidates, heldPayload, expire
     created_at: nowIso(), expires_at: expiresAt || ttlIso(),
   };
   const { data, error } = await supabase.from(TABLE).insert(row).select('*').single();
-  if (error) { logger.warn('clarifications.enqueue failed', String((error && error.message) || error)); return null; }
+  if (error) { logger.warn('clarifications.enqueue failed', errText(error)); return null; }
   return data;
 }
 
@@ -189,28 +205,32 @@ export async function enqueue({ userId, mention, candidates, heldPayload, expire
 // and store its question, and return it. Enforces one-active-per-user + FIFO.
 export async function activateNext(userId, { askedMessageId } = {}) {
   if (await getActive(userId)) return null;
-  const { data } = await supabase.from(TABLE).select('*')
+  const { data, error } = await supabase.from(TABLE).select('*')
     .eq('user_id', userId).eq('status', 'pending')
     .order('created_at', { ascending: true }).limit(1).maybeSingle();
+  if (error) logger.warn('clarifications.activateNext read failed', errText(error));
   if (!data) return null;
   const clarify = (data.held_payload && data.held_payload.clarify) || {};
   const question = data.question_text || authorQuestion(clarify);
-  await supabase.from(TABLE).update({
+  const { error: upErr } = await supabase.from(TABLE).update({
     status: 'active', activated_at: nowIso(), question_text: question, asked_message_id: askedMessageId || null,
   }).eq('id', data.id).eq('user_id', userId);
+  if (upErr) logger.warn('clarifications.activateNext update failed', errText(upErr));
   return { clarification: { ...data, status: 'active', question_text: question }, question };
 }
 
 export async function resolveRow(id, userId, { resolution, resolvedPersonId, answeredMessageId } = {}) {
-  await supabase.from(TABLE).update({
+  const { error } = await supabase.from(TABLE).update({
     status: 'resolved', resolution, resolved_person_id: resolvedPersonId || null,
     answered_message_id: answeredMessageId || null, resolved_at: nowIso(),
   }).eq('id', id).eq('user_id', userId);
+  if (error) logger.warn('clarifications.resolveRow failed', errText(error));
 }
 
 export async function bumpReask(active, userId) {
-  await supabase.from(TABLE).update({ reask_count: (active.reask_count || 0) + 1 })
+  const { error } = await supabase.from(TABLE).update({ reask_count: (active.reask_count || 0) + 1 })
     .eq('id', active.id).eq('user_id', userId);
+  if (error) logger.warn('clarifications.bumpReask failed', errText(error));
 }
 
 // ── Per-turn orchestrator (§2.2). deps = { resolveEntities, persist }. Returns
@@ -286,8 +306,9 @@ export async function dispatch({ user, message, parsed, body, inSuppression = fa
 // deps: persist (injected), loadUser (id -> {id, timezone}). Returns { resolved }.
 export async function sweepExpired({ persist, loadUser, now = Date.now() } = {}) {
   const cutoff = new Date(now).toISOString();
-  const { data } = await supabase.from(TABLE).select('*')
+  const { data, error } = await supabase.from(TABLE).select('*')
     .in('status', ['active', 'pending']).lte('expires_at', cutoff);
+  if (error) logger.warn('clarifications.sweepExpired read failed', errText(error));
   const rows = data || [];
   let resolved = 0;
   const touchedUsers = new Set();
@@ -301,8 +322,8 @@ export async function sweepExpired({ persist, loadUser, now = Date.now() } = {})
       await applyHeldWrites({ user, personId: created.id, held: row.held_payload, persist });
       await resolveRow(row.id, row.user_id, { resolution: 'expired_default_new', resolvedPersonId: created.id });
       resolved++; touchedUsers.add(row.user_id);
-    } catch (err) { logger.warn('clarifications.sweepExpired failed for row', String(err)); }
+    } catch (err) { logger.warn('clarifications.sweepExpired failed for row', errText(err)); }
   }
-  for (const uid of touchedUsers) { try { await activateNext(uid); } catch { /* best-effort */ } }
+  for (const uid of touchedUsers) { try { await activateNext(uid); } catch (err) { logger.warn('clarifications.sweepExpired activateNext failed', errText(err)); } }
   return { resolved };
 }

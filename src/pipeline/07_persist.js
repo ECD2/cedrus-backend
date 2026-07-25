@@ -4,6 +4,22 @@ import * as users from '../services/users.js';
 import * as people from '../services/people.js';
 import { logger } from '../utils/logger.js';
 
+// Unmask a swallowed DB error: surface message + SQLSTATE code (+ constraint / detail)
+// instead of String(err)'s "[object Object]". A bare String(err) on these catches is
+// exactly what hid the live 22007 incident — a natural-language event_date exploding a
+// timestamptz insert and silently dropping the whole saved item. The log line must carry
+// the SQLSTATE, or a write-path failure that loses a user's memory stays invisible.
+function errText(err) {
+  if (!err) return 'unknown error';
+  const parts = [err.message || String(err)];
+  if (err.code) parts.push('code=' + err.code);
+  if (err.constraint) parts.push('constraint=' + err.constraint);
+  const detail = err.details || err.detail;
+  if (detail) parts.push('detail=' + detail);
+  if (err.hint) parts.push('hint=' + err.hint);
+  return parts.join(' ');
+}
+
 // ── Fix H1: the model PROPOSES, this file DISPOSES. Every enum-bound value is
 // validated/coerced before it touches Postgres, and every item writes inside its
 // own try/catch so one bad value can never poison the rest of the message.
@@ -69,7 +85,7 @@ export async function persist({ user, message, parsed, resolved }) {
     // never lands in the database.
     if (p.corrected_name) {
       try { await people.rename(user.id, personId, p.corrected_name); }
-      catch (err) { logger.warn('persist: rename failed', p.corrected_name, String(err)); }
+      catch (err) { logger.warn('persist: rename failed', p.corrected_name, errText(err)); }
     }
     const signal = pick(p.contact_signal, SIGNALS, 'none');
     try {
@@ -82,7 +98,7 @@ export async function persist({ user, message, parsed, resolved }) {
       if (CONTACT_SIGNALS.includes(signal)) {
         await rel.logContact({ userId: user.id, personId, source: 'inferred', sourceMessageId: message.id });
       }
-    } catch (err) { logger.warn('persist: skipped bad person link', p.mention_text, String(err)); }
+    } catch (err) { logger.warn('persist: skipped bad person link', p.mention_text, errText(err)); }
   }
 
   // facts (supersession + key normalization applied inside addFact)
@@ -111,7 +127,7 @@ export async function persist({ user, message, parsed, resolved }) {
       if (memory.canonicalFactKey(f.fact_key) === 'relationship') {
         await people.setRelationship(user.id, personId, factValue.slice(0, 100));
       }
-    } catch (err) { logger.warn('persist: skipped bad fact', f.fact_value, String(err)); }
+    } catch (err) { logger.warn('persist: skipped bad fact', f.fact_value, errText(err)); }
   }
 
   // saved items
@@ -126,8 +142,9 @@ export async function persist({ user, message, parsed, resolved }) {
         description: s.description, eventDate: s.event_date, url: s.url,
         origin: pick(s.origin, ORIGINS, 'cedrus_inferred'),
         sourceMessageId: message.id,
+        timezone: user.timezone, // normalize a model-fed event_date in the user's tz (drops if unparseable)
       });
-    } catch (err) { logger.warn('persist: skipped bad saved item', s.title, String(err)); }
+    } catch (err) { logger.warn('persist: skipped bad saved item', s.title, errText(err)); }
   }
 
   // birthdays -> structured people.birthday_month/day (the field the engines read).
@@ -141,30 +158,30 @@ export async function persist({ user, message, parsed, resolved }) {
     if (!personId) continue;
     if (!validBirthday(month, day)) { logger.warn('persist: skipped invalid birthday', b.month, b.day); continue; }
     try { await people.setBirthday(user.id, personId, { month, day }); birthdayHandled.add(personId); }
-    catch (err) { logger.warn('persist: skipped bad birthday', String(err)); }
+    catch (err) { logger.warn('persist: skipped bad birthday', errText(err)); }
   }
 
   // reminders + goals
   for (const r of parsed.reminders || []) {
-    if (!r.trigger_at || isNaN(new Date(r.trigger_at).getTime())) {
-      logger.warn('persist: skipped reminder with bad trigger_at', r.trigger_at);
-      continue;
-    }
+    // No date guard here: trigger_at is normalized in ONE place (memory.addReminder →
+    // toTimestamptz). An unparseable time throws there and is caught below, skipping
+    // just this reminder — a reminder with no schedulable time can't be saved anyway.
     const personId = ref(r.person_ref);
     const reminderType = pick(r.reminder_type, REMINDER_TYPES, 'custom');
     try {
       await memory.addReminder({
         userId: user.id, personId, title: r.title || 'Reminder',
         triggerAt: r.trigger_at, reminderType, sourceMessageId: message.id,
+        timezone: user.timezone,
       });
-    } catch (err) { logger.warn('persist: skipped bad reminder', r.title, String(err)); }
+    } catch (err) { logger.warn('persist: skipped bad reminder', r.title, errText(err)); }
     // Keep the reminder (above) AND backfill the structured birthday from it, so a
     // model that files a birthday ONLY as a reminder still populates people.birthday.
     if (reminderType === 'birthday' && personId && !birthdayHandled.has(personId)) {
       const md = monthDayFromIsoDate(r.trigger_at);
       if (md) {
         try { await people.setBirthday(user.id, personId, md); birthdayHandled.add(personId); }
-        catch (err) { logger.warn('persist: birthday backfill failed', String(err)); }
+        catch (err) { logger.warn('persist: birthday backfill failed', errText(err)); }
       }
     }
   }
@@ -176,7 +193,7 @@ export async function persist({ user, message, parsed, resolved }) {
         dueAt: g.due_at, sourceMessageId: message.id,
         timezone: user.timezone, // Fix H4: goals stamped in the USER'S week, not UTC's
       });
-    } catch (err) { logger.warn('persist: skipped bad goal', g.goal_text, String(err)); }
+    } catch (err) { logger.warn('persist: skipped bad goal', g.goal_text, errText(err)); }
   }
 
   // pending-prompt cascade (the self-healing loop)
@@ -190,6 +207,6 @@ export async function persist({ user, message, parsed, resolved }) {
         interpreted: pa.interpreted, detail: pa.detail,
       });
       if (found && pa.interpreted === 'yes') await users.incrementShowingUp(user.id);
-    } catch (err) { logger.warn('persist: prompt cascade failed', String(err)); }
+    } catch (err) { logger.warn('persist: prompt cascade failed', errText(err)); }
   }
 }
