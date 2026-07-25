@@ -92,18 +92,52 @@ export async function addFact({ userId, personId, factType, factKey, factValue, 
   if (error) throw error;
 }
 
-export async function addSavedItem({ userId, personId, itemType, title, description, eventDate, url, origin, sourceMessageId }) {
+// ── Model-fed timestamps: the ONE normalizer for every timestamptz the model can
+// fill (saved_items.event_date, reminders.trigger_at, user_goals.due_at). The
+// extractor is told to emit fully-localized ISO-8601, but it sometimes emits natural
+// language ("this morning", "tonight"); inserted raw, that explodes a timestamptz
+// write with SQLSTATE 22007 and — before the catches were unmasked — silently
+// destroyed the WHOLE item. Rule: accept ISO-8601 (date or datetime, optional
+// offset) and return a UTC instant; return null for anything else. A bare calendar
+// date is anchored to 12:00 UTC so its day is preserved for every US timezone (00:00Z
+// would slip a western-US date back to the previous evening). The CALLER decides what
+// null means: a nullable garnish (event_date / due_at) drops the date and KEEPS the
+// row; a NOT-NULL column (reminders.trigger_at) treats null as "no schedulable time".
+// Parse model timestamps HERE and nowhere else — do not re-parse per call site.
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/;
+export function toTimestamptz(value, _timezone) {
+  if (value == null) return null;
+  if (value instanceof Date) return isNaN(value.getTime()) ? null : value.toISOString();
+  if (typeof value === 'number') { const d = new Date(value); return isNaN(d.getTime()) ? null : d.toISOString(); }
+  const s = String(value).trim();
+  if (!s) return null;
+  let d;
+  if (ISO_DATE.test(s)) d = new Date(s + 'T12:00:00Z');        // bare date → noon UTC (day stable across US tz)
+  else if (ISO_DATETIME.test(s)) d = new Date(s.replace(' ', 'T'));
+  else return null;                                            // natural language / garbage → drop the date
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+export async function addSavedItem({ userId, personId, itemType, title, description, eventDate, url, origin, sourceMessageId, timezone }) {
   const { error } = await supabase.from('saved_items').insert({
     user_id: userId, person_id: personId, item_type: itemType, title,
-    description: description || null, event_date: eventDate || null, url: url || null,
+    // event_date is a nullable garnish: an unparseable model date drops to null so the
+    // memory is STILL saved — a bad date must never destroy the item (this was the 22007).
+    description: description || null, event_date: toTimestamptz(eventDate, timezone), url: url || null,
     origin: origin || 'cedrus_inferred', source_message_id: sourceMessageId,
   });
   if (error) throw error;
 }
 
-export async function addReminder({ userId, personId, title, triggerAt, reminderType, sourceMessageId }) {
+export async function addReminder({ userId, personId, title, triggerAt, reminderType, sourceMessageId, timezone }) {
+  // reminders.trigger_at is NOT NULL, and a reminder with no schedulable time is
+  // meaningless — so an unparseable time throws (persist skips just this reminder, with
+  // a now-unmasked error) rather than inserting null or a natural-language 22007.
+  const at = toTimestamptz(triggerAt, timezone);
+  if (!at) throw new Error('addReminder: unparseable trigger_at ' + JSON.stringify(triggerAt));
   const { error } = await supabase.from('reminders').insert({
-    user_id: userId, person_id: personId, title, trigger_at: triggerAt,
+    user_id: userId, person_id: personId, title, trigger_at: at,
     reminder_type: reminderType || 'custom', created_by: 'cedrus', source_message_id: sourceMessageId,
   });
   if (error) throw error;
@@ -114,7 +148,8 @@ export async function addGoal({ userId, personId, goalText, dueAt, sourceMessage
   // must belong to the week the mid-week sweep will look for it in.
   const weekOf = timezone ? localWeekOf(timezone) : mondayOf(new Date());
   const { error } = await supabase.from('user_goals').insert({
-    user_id: userId, person_id: personId, goal_text: goalText, due_at: dueAt || null,
+    // due_at is a nullable garnish (like event_date): unparseable → null, keep the goal.
+    user_id: userId, person_id: personId, goal_text: goalText, due_at: toTimestamptz(dueAt, timezone),
     week_of: weekOf, source_message_id: sourceMessageId,
   });
   if (error) throw error;
