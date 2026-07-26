@@ -176,4 +176,20 @@ run_js "$(bundle test/reliability-core.js src/utils/time.js src/services/goals.j
 section "§6 suppression read logging"
 run_js "$(bundle test/prelude-suppression.js src/services/safetyFlags.js test/suppression-read.test.js)"
 
+# ── Bundle 21: quota reads — the ONLY per-user spend ceiling announces itself ─
+# Real usage.js + the real checkRateLimit over a programmable (table-aware) seam.
+# Asserts fail-open is PRESERVED (a false "over quota" would answer a crisis
+# message with the rate-limit template, since STAGE B3 precedes the Priority 0
+# gate inside understand()) while the fail-open is now logged.
+section "quota read fail-open logging"
+OUTQ="$(mktemp -t cedrus-tests).js"
+{
+  cat test/prelude-quota.js
+  strip src/services/usage.js
+  echo 'const usage = { getMessageQuota, getNudgeUsage };'
+  strip src/pipeline/04_rateLimit.js
+  cat test/quota-read.test.js
+} > "$OUTQ"
+run_js "$OUTQ"
+
 printf '\n✅ All test bundles passed.\n'
