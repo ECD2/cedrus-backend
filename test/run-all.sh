@@ -29,6 +29,10 @@ echo "=== Priority 3 — web search & injection resistance ==="
 $RUNNER test/search.test.mjs
 
 echo ""
+echo "=== Onboarding — self-name capture (Station 3) ==="
+$RUNNER test/self-name.test.mjs
+
+echo ""
 echo "ALL WS-B SUITES PASSED"
 
 echo ""
