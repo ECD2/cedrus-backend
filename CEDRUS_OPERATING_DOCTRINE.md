@@ -168,7 +168,7 @@ against the database or a real request, and update this section if reality has m
   `run-all.sh` instead. `run-all.sh` invokes `run-tests.sh` first, so either way they execute
   inside the one gating battery.
 - **Bundle numbers in use: 17 (model-timestamps), 18 (interests), 19 (goals), 20 (§6 suppression
-  read).** Next free: **21.** Station docs have claimed already-taken numbers more than once —
+  read), 21 (quota reads).** Next free: **22.** Station docs have claimed already-taken numbers more than once —
   check `test/run-tests.sh`, don't trust.
 - **The concat rig can host failure-branch tests — but not with `reliability-core.js`.** Its fake
   Supabase is a working in-memory DB: it always resolves `{ error: null }` and can never throw, so
@@ -252,6 +252,31 @@ against the database or a real request, and update this section if reality has m
   injects its own `isInSuppressionWindow` stub, so coverage of that module is Bundle 20 and
   nothing else: if you change `safetyFlags.js`, that bundle is the only thing standing under you.
 
+**Spend, quotas, and the crisis ordering**
+- **`checkRateLimit()` is the ONLY per-user spend ceiling in the application.** It fronts the one
+  OpenAI call on both the inbound SMS path (`pipeline/index.js:97`, STAGE B3) and web capture
+  (`capture.js:154`). Free cap is 20 inbound/day (`v_message_quota`).
+- **Nothing reads `v_daily_token_usage` or `v_daily_sms_usage`** — the cost views exist and have
+  zero consumers in `src/`. There is **no alerting, no budget guard, and no automatic kill switch**
+  anywhere in the backend (`config.enableJobs` is a manual global switch for jobs only). The real
+  backstops are OpenAI's and Twilio's own account-level limits, which live outside this repo —
+  verify them in those dashboards, don't assume the code has you covered.
+- **STAGE B3 runs BEFORE the Priority 0 crisis gate.** The safety detector lives *inside*
+  `understand()` (STAGE C, `pipeline/index.js:104`); the comment in `05_understand.js` about crisis
+  "short-circuiting earlier" means earlier *within* `understand()`, not earlier than the rate limit.
+  So `allowed:false` returns `MSG_RATE_LIMIT` and the crisis detector never runs. **This decides
+  the fail-open/fail-closed question for every quota guard on the inbound path: failing closed can
+  answer a crisis message with "you've hit your daily limit."** Cost is worth less than that.
+- Consequence worth its own flag: this is already reachable at the genuine 20/day cap, not just on
+  a DB error. See flag 16.
+- Both quota reads now emit `quota.read.failed` (`error_category: 'db_error'`,
+  `outcome: 'fail_open'`, `error_code`) on error OR missing row; healthy reads stay silent. The
+  views are `... FROM app_users u`, so a missing row means the id isn't a user — abnormal in itself.
+- `sweeps/eligibility.js:22` guards with `if (budget && ...)`, so a nullish budget **skips the
+  weekly nudge cap entirely** rather than clamping it. Fail-open there too, now announced.
+- A *thrown* quota read was never silent — it propagates to the `routes/sms.js:41` catch and logs
+  `sms.pipeline.error`. Only the `{ data, error }` path was invisible.
+
 **Config**
 - `NODE_ENV` must be set to `production` on the Railway backend service. `assertSecureBoot()`
   gates its hard failures on it; unset means several checks silently downgrade to warnings or
@@ -267,6 +292,10 @@ against the database or a real request, and update this section if reality has m
   greps for "PASSED" and stops reading will report a green battery it never observed. There is a
   second banner, "ALL BATTERY SUITES PASSED", at the true end; even that is weaker proof than the
   exit code.
+- **When you cross-check the log, grep `^  FAIL`, not `FAIL`.** A bare `grep -c FAIL` matches
+  prose — a section heading reading "still FAILS OPEN" made an all-green run report a failure
+  (2026-07-26). The assertion prefix is two spaces + `FAIL`; `TEST(S) FAILED` is the other real
+  marker. Corollary: **never put the token `FAIL` in a test's section heading.**
 
 ---
 
@@ -462,11 +491,14 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 | 8 | Onboarding infers the user's name from an open reply | The rebuild should ask for the name in its own explicit step. |
 | 9 | Extractor once emitted the same saved-item title for two different messages | Never root-caused, not currently reproducible. |
 | 10 | ~~The §6 crisis cooldown has never worked~~ **CLOSED 2026-07-26.** Column added and the cooldown proven end to end; the read now announces its abnormal branches and is covered by Bundle 20. | Closed at the root, not the surface: the instance (missing column) AND the shape (a `false` that couldn't say why) are both addressed. |
-| 11 | **`checkRateLimit()` fails OPEN with zero log output.** `getMessageQuota` discards `error`; `undefined` ⇒ `allowed: true` | Should an unreadable quota fail open or closed? Decide deliberately. Blast radius is uncapped OpenAI + Twilio spend per user. |
+| 11 | ~~`checkRateLimit()` fails OPEN with zero log output~~ **CLOSED 2026-07-26.** Both quota reads now emit `quota.read.failed`; verdicts unchanged. | Answered deliberately: stays OPEN, because STAGE B3 precedes the Priority 0 crisis gate and failing closed could answer a crisis with the rate-limit template. Covered by Bundle 21, mutation-checked. **The spend ceiling is now observable, not enforced any harder — see flags 17 and 18.** |
 | 12 | `days_since_contact` NULL-gated on the never-written `contact_frequency_days` | One-line view fix, but needs a real post-check that "Last touch" renders a value and that no consumer depends on the NULL. Also fix the unchecked `healthRes.error` at frontend `data.ts:197` — a latent second path to the identical symptom. |
 | 13 | "Nothing saved yet" is facts-only copy sitting above the saved-items panel | Copy/IA, not data. Scope the string to facts. |
 | 14 | 45 of 101 `supabase.from()` sites don't bind `error` | The generator of this whole class. A sweep, not an emergency — but track it as ONE item so it doesn't fragment into forty-five. |
 | 15 | ~~`isInSuppressionWindow()` collapses 4 states into a silent `return false`~~ **CLOSED 2026-07-26** under an explicit narrow Law-2 exception from Emil. | Logging only; control flow unchanged; still fails OPEN. Covered by Bundle 20 and mutation-checked. **The same shape is still live in flags 11 and 14** — this fixed one instance, not the class. |
+| 16 | **A rate-limited user in crisis gets the cap message, not crisis resources.** STAGE B3 returns `MSG_RATE_LIMIT` before `understand()` runs Priority 0. | Reachable TODAY at the genuine 20/day cap — not a hypothetical. Pre-existing, found while costing flag 11, deliberately NOT fixed in that scope. Likely fix: run deterministic safety detection before the abuse cap, or exempt a message that trips the crisis regex. Safety-path change; needs its own gated session. |
+| 17 | No cost monitoring anywhere | `v_daily_token_usage` and `v_daily_sms_usage` exist with **zero consumers**. Nothing alerts on spend. `quota.read.failed` is now emitted but nothing consumes it either — an alert has to be wired somewhere for it to matter. |
+| 18 | No spend ceiling outside the app is verified | OpenAI and Twilio account-level caps are the only real backstops and they live outside this repo. Confirm they exist and are set before beta. |
 
 ---
 
@@ -474,6 +506,15 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 
 Append here when the doctrine changes. Date, what changed, why.
 
+- **2026-07-26 (latest)** — Closed flag 11. `getMessageQuota` / `getNudgeUsage` now emit a
+  structured `quota.read.failed` event on error or missing row; healthy reads stay silent; return
+  contracts and every verdict unchanged. **Kept failing OPEN deliberately** — the deciding factor
+  was not cost but that STAGE B3 precedes the Priority 0 crisis gate, so failing closed could
+  answer a crisis message with the rate-limit template. Recorded the spend picture (only ceiling,
+  no cost consumers, no alerting) and the `grep '^  FAIL'` discipline after a section heading
+  reading "FAILS OPEN" made a green run look red. Added **Bundle 21**, mutation-checked. Opened
+  flags 16 (crisis message blocked by the cap — reachable today), 17 (no cost monitoring) and
+  18 (unverified account-level ceilings). Next free bundle: 22.
 - **2026-07-26 (late)** — Closed the §6 work at the root. `isInSuppressionWindow()` now logs its
   three abnormal branches (query error / no user row / thrown) and stays silent on the legitimate
   NULL branch; control flow unchanged, still fails OPEN. Made under an **explicit narrow Law-2
