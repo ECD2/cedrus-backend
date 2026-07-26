@@ -71,4 +71,9 @@ echo "=== NF2 — interests API (CRUD / auth / opt-out) ==="
 bun test/interests.test.mjs
 
 echo ""
+echo "=== INFRA-10 — insights API (feed / auth / entitlement tags) ==="
+# bun explicitly, not $RUNNER: the suite uses bun's mock.module.
+bun test/insights-route.test.mjs
+
+echo ""
 echo "ALL BATTERY SUITES PASSED"
