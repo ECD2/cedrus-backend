@@ -158,4 +158,9 @@ OUTT="$(mktemp -t cedrus-tests).js"
 } > "$OUTT"
 run_js "$OUTT"
 
+# ── Bundle 18: interests read-path — discovery gather degrades when the interests
+# table is absent (its N5 foundation migration is unrun; docs/INTERESTS.proposed.sql).
+section "discovery interests degradation"
+run_js "$(bundle test/reliability-core.js src/services/discovery.js test/discovery-interests-degradation.test.js)"
+
 printf '\n✅ All test bundles passed.\n'
