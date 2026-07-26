@@ -122,6 +122,7 @@ claim.
 | **A parsing/format fix** | Before/after on the real reported inputs, showing old behavior and new behavior side by side. |
 | **A filter added to a shared query** | A regression run proving existing consumers see exactly the rows they saw before — with a guard that fails if the fixture returns nothing. |
 | **Graceful degradation** | Reproduce the actual failure condition (real SQLSTATE, real missing relation) and show the code surviving it — plus a test proving the catch isn't over-scoped. |
+| **Arming a previously-inert guard** | Drive the REAL module against real prod through all three states — off, ON, and expired — **plus a control proving the "off" answer now comes from the healthy path and not the broken one.** For a boolean guard the two look identical, so reproducing the OLD failure signature side by side is the only thing that separates them. Then enumerate every consumer and confirm none of them can now break. |
 
 **The universal rule: run the control.** Whatever you think proves your claim, ask what result you
 would get if the claim were false. If it's the same result, you have no proof. This has caught
@@ -150,6 +151,13 @@ against the database or a real request, and update this section if reality has m
   negative-offset zones — currently protected by the noon anchor.
 
 **Tooling**
+- `run-migration.mjs` takes **one** argument (`<path-to.sql>`). An older note said `<ddl.sql>
+  <table>`; the second arg is read by nothing. Corrected 2026-07-26.
+- **`run-migration.mjs` cannot parse a schema-qualified `ALTER TABLE`.** Its regex captures
+  `([A-Za-z_]\w*)`, so `ALTER TABLE public.app_users` makes it verify a table literally named
+  `public` — the in-txn check then fails and it ROLLS BACK. It **fails closed**, so nothing lands
+  and nothing is corrupted, but the migration silently does not apply. **Write table names
+  unqualified**, as every prior `docs/*.proposed.sql` does. (Verified by hitting it, 2026-07-26.)
 - `run-migration.mjs` parses **only DDL objects** (CREATE TABLE / ADD COLUMN / CREATE INDEX).
   **Never feed it a data write.** It would run the UPDATE inside its transaction while pre-check,
   in-txn verify, and post-check all iterate empty lists and print "all declared objects present"
@@ -213,9 +221,25 @@ against the database or a real request, and update this section if reality has m
   (`is_current=true`, `status IN ('active','surfaced')`). A dinner logged as an *event* lands in
   `saved_items` and produces **no** `facts` row — so "Nothing saved yet" above a populated saved
   list is accurate copy, not a bug.
-- `app_users.crisis_suppressed_until` **DOES NOT EXIST in prod** (full 39-column list pulled from
-  `information_schema`, 2026-07-26). Everything in `safetyFlags.js` that reads or writes it has
-  been inert since it shipped.
+- `app_users.crisis_suppressed_until` — **CORRECTED same day.** It did not exist when the census
+  ran (39-column dump, 2026-07-26 ~19:20), which is why `safetyFlags.js` had been inert since it
+  shipped. **It EXISTS as of 2026-07-26 ~23:30**: `timestamptz`, nullable, no default, added by
+  `docs/SAFETY_SUPPRESSION_COLUMN.proposed.sql`. The §6 cooldown is now armed and proven end to
+  end against prod. **Schema-only — no code change was needed**, and `safetyFlags.js` was not
+  touched (Law 2).
+- Arming it enforces suppression in **six** live consumers: `dailySweeps.js:31`,
+  `weeklyBrief.js:37` + `:117`, `briefEmail.js:212`, `briefEngine.js:310`, `pipeline/index.js:133`
+  (`discovery.js:396` is inert). **Every one of them only REMOVES optional content** — playful
+  nudges, Pro teasers, clarification re-asks. None blocks a core function or can throw. That is
+  why flipping this switch was safe, and it is the enumeration Lesson 7 demands before arming any
+  inert guard.
+- `app_users` carries `trg_app_users_updated_at` (BEFORE UPDATE → `set_updated_at()`). **Any write
+  bumps `updated_at`, so a write test can never restore the table byte-for-byte.** Nothing in
+  `src/` reads `app_users.updated_at`. Don't try to forge it back — that needs a trigger disable
+  on a live table, which is riskier than the drift.
+- **No test anywhere imports the real `safetyFlags.js`.** Every consumer test injects its own
+  `isInSuppressionWindow` stub. Changing that file has near-zero risk of breaking the battery —
+  and correspondingly zero protection from it.
 
 **Config**
 - `NODE_ENV` must be set to `production` on the Railway backend service. `assertSecureBoot()`
@@ -223,9 +247,15 @@ against the database or a real request, and update this section if reality has m
   emit nothing at all. **Verified set to `production` 2026-07-26**, alongside
   `VALIDATE_TWILIO_SIGNATURE=true` and `PUBLIC_BASE_URL`. The guard is armed again — but it still
   cannot announce which mode it ran in, so Lesson 7 stands.
-- `test/run-all.sh` prints **"ALL WS-B SUITES PASSED" roughly halfway through**, with six suites
-  still to run. `set -e` protects the exit code so the gate is sound — but that line is NOT proof
-  the battery passed. Quote the exit code, never that line.
+- **The `run-all.sh` false-pass trap — measured 2026-07-26.** The script prints
+  **"ALL WS-B SUITES PASSED" at line 1096 of 2404 — 46% of the way through — with THIRTEEN more
+  suites still to run** (CORS, N1 admin panel, N3 web API, WS-F email ×3, admin auth, web
+  onboarding, import, interests, insights, reminders). `set -e` protects the exit code, so the
+  gate itself is sound. But the banner is a mid-run status line for one workstream, not a verdict.
+  **Gate on `echo $?` — never on that line, and never on eyeballing the tail.** A session that
+  greps for "PASSED" and stops reading will report a green battery it never observed. There is a
+  second banner, "ALL BATTERY SUITES PASSED", at the true end; even that is weaker proof than the
+  exit code.
 
 ---
 
@@ -373,7 +403,28 @@ about a dependency's error model reproduces itself everywhere the dependency is 
 the failure value is almost always also a legitimate answer. `false` means both "checked, fine" and
 "couldn't check." Prefer three states, or log the mode.
 
-### 12. Correct your own stale notes
+### 12. Removing the cause is not removing the shape
+
+**Incident.** The §6 crisis cooldown was dead because `app_users.crisis_suppressed_until` didn't
+exist. One additive column fixed it, no code change, proven end to end (2026-07-26). Tempting to
+call the bug closed.
+
+It isn't. `isInSuppressionWindow()` still funnels **four** different situations into a bare
+`return false` with no logging: query error, user row not found, column NULL, thrown exception.
+Only the third is a legitimate "no window." The migration removed the condition that was firing
+branch one — it did nothing to the fact that branches one, two and four are still invisible and
+still indistinguishable from three. Drop the column, rename it, or let PostgREST's schema cache go
+stale on a redeploy, and the guard silently goes inert again with no signal.
+
+**Rule.** After fixing a silent-failure instance, ask: **would I find out if this broke again
+tomorrow?** If the answer is no, you fixed the trigger, not the defect. Record the remaining shape
+as an open flag in the same session — otherwise the green result becomes evidence the whole class
+is handled.
+
+**Corollary.** This is Lesson 5 ("fixing the code does not fix the data") pointed the other way:
+fixing the *data* does not fix the *code*.
+
+### 13. Correct your own stale notes
 
 **Incident.** A session recorded `interests` as missing from prod. It then ran the migration that
 created it — and went back and corrected the note, because a future session reading it would have
@@ -399,11 +450,12 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 | 7 | Interests frontend still on localStorage mock | Safe to wire now. Frontend change = live deploy, so it needs its own gated session. |
 | 8 | Onboarding infers the user's name from an open reply | The rebuild should ask for the name in its own explicit step. |
 | 9 | Extractor once emitted the same saved-item title for two different messages | Never root-caused, not currently reproducible. |
-| 10 | **The §6 crisis cooldown has never worked.** `app_users.crisis_suppressed_until` does not exist in prod, so `isInSuppressionWindow()` always returns `false` = "not suppressed" | Highest-priority fix. Safety path, actively broken, structurally silent. Schema first (Lesson 6), then make the read fail closed or log. Needs its own gated session. |
+| 10 | ~~The §6 crisis cooldown has never worked~~ **HALF-CLOSED 2026-07-26.** Column added, cooldown armed and proven end to end. | **What remains: `isInSuppressionWindow()` still has no logging at all**, so query-error / no-such-user / thrown-exception are still indistinguishable from a legitimate "no window" (Lesson 12). Awaiting Emil's decision on touching a Law-2 file — see flag 15. |
 | 11 | **`checkRateLimit()` fails OPEN with zero log output.** `getMessageQuota` discards `error`; `undefined` ⇒ `allowed: true` | Should an unreadable quota fail open or closed? Decide deliberately. Blast radius is uncapped OpenAI + Twilio spend per user. |
 | 12 | `days_since_contact` NULL-gated on the never-written `contact_frequency_days` | One-line view fix, but needs a real post-check that "Last touch" renders a value and that no consumer depends on the NULL. Also fix the unchecked `healthRes.error` at frontend `data.ts:197` — a latent second path to the identical symptom. |
 | 13 | "Nothing saved yet" is facts-only copy sitting above the saved-items panel | Copy/IA, not data. Scope the string to facts. |
 | 14 | 45 of 101 `supabase.from()` sites don't bind `error` | The generator of this whole class. A sweep, not an emergency — but track it as ONE item so it doesn't fragment into forty-five. |
+| 15 | `isInSuppressionWindow()` collapses 4 states into a silent `return false` | **DECISION NEEDED — Law 2 file.** ~8 lines: log the error and thrown branches, stay silent on the legitimate NULL branch, keep failing OPEN. Fail-closed was considered and rejected: a DB blip would then mute every user's content, trading one silent failure for a worse one. `logger` is already imported; no test imports this module, so battery risk is ~zero (and so is battery protection). |
 
 ---
 
@@ -411,6 +463,15 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 
 Append here when the doctrine changes. Date, what changed, why.
 
+- **2026-07-26 (evening)** — Armed the §6 crisis cooldown. One additive column
+  (`app_users.crisis_suppressed_until`, timestamptz/nullable/no default) applied via the runner;
+  **no code change, `safetyFlags.js` untouched (Law 2)**. Corrected the same-day Part 4 note that
+  said the column does not exist. Added: the `run-migration.mjs` schema-qualifier parse failure
+  (fails closed, but silently doesn't apply), the measured `run-all.sh` false-pass trap (banner at
+  46%, 13 suites after it), the `app_users` `updated_at` trigger, and the fact that no test imports
+  `safetyFlags.js`. New Part 3 proof row for arming an inert guard. New Lesson 12 (removing the
+  cause is not removing the shape); old 12 → 13. Flag 10 half-closed; flag 15 opened for Emil's
+  Law-2 decision.
 - **2026-07-26** — Moved into the `cedrus-backend` repo root and made load-bearing (`CLAUDE.md`,
   `README.md`, `NOTES.md` all now open with a pointer to it). Added the silent-guard census results:
   the `supabase-js` never-throws contract and the 45 unbound call sites (Part 4 + new Lesson 11),
