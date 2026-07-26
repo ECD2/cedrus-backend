@@ -163,4 +163,9 @@ run_js "$OUTT"
 section "discovery interests degradation"
 run_js "$(bundle test/reliability-core.js src/services/discovery.js test/discovery-interests-degradation.test.js)"
 
+# ── Bundle 19: user-set goals — pure vital-few selection + store/read layer ──
+# time.js is included because goals.js stamps week_of via localWeekOf/mondayOf.
+section "user-set goals"
+run_js "$(bundle test/reliability-core.js src/utils/time.js src/services/goals.js test/goals.test.js)"
+
 printf '\n✅ All test bundles passed.\n'

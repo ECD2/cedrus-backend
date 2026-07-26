@@ -1,5 +1,15 @@
 # Station 5 (INFRA-15 goals foundation) → FLAGS for the merge owner
 
+> **SUPERSEDED IN PART (2026-07-26).** §2 said the bundle becomes 17; main had
+> already taken 17 and 18, so it landed as **bundle 19**. §3's schema was
+> rejected in favour of the additive-only `docs/GOALS_ADDITIVE.proposed.sql`
+> (two ADD COLUMNs; no `week_of` NOT NULL drop, no CHECK swap) and the code was
+> conformed to the existing schema instead: `STATUS_ACTIVE = 'open'`, `week_of`
+> stamped with the creation week, and `origin` filters added to
+> `memory.getOpenGoals` / `getOpenGoalsThisWeek`. §4's "optional lever" is no
+> longer optional — it is the isolation mechanism. §1's mount is applied.
+
+
 New files only. This station did NOT edit any shared file (src/index.js,
 test/run-tests.sh, test/run-all.sh, package.json) or any safety module. The
 exact one-line changes those files need are below, for the owner to apply at

@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase.js';
+import { mondayOf, localWeekOf } from '../utils/time.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // USER-SET GOALS (INFRA-15) — the standing, user-authored goals surface.
@@ -14,23 +15,26 @@ import { supabase } from '../lib/supabase.js';
 //     file filters origin='user_set', so a user goal is never confused with a
 //     weekly intention.
 //
-//   • status — inferred intentions live at 'open'; user-set goals live at
-//     'active'. This is the LOAD-BEARING isolation: memory.getOpenGoals /
-//     getOpenGoalsThisWeek and relationships.js' completion transition all
-//     filter .eq('status','open'), so a user-set goal is invisible to the
-//     weekly brief / insights / discovery reads BY CONSTRUCTION. That matters:
-//     jobs/brief/select.js and briefEngine.js take getOpenGoals()[0] for the
-//     "did you reach out?" follow-up, and a person-less life goal must never
-//     hijack that slot. (If a future product decision DOES want user-set goals
-//     in those reads, that is a one-line filter change in the memory.js
-//     owner's file — flagged in docs/FLAGS_FROM_STATION5_GOALS.md, never made
-//     here.) The isolation is proven directly in test/goals.test.js.
+//     The SAME key guards the other direction: memory.getOpenGoals and
+//     getOpenGoalsThisWeek filter origin='cedrus_inferred', so a user-set goal
+//     is invisible to the weekly brief / insights / discovery reads BY
+//     CONSTRUCTION. That matters: briefEngine.js takes getOpenGoals()[0] for
+//     the "did you reach out?" follow-up, and a person-less life goal must
+//     never hijack that slot. The isolation is proven in test/goals.test.js.
 //
-// New columns this feature needs (PROPOSED, not run): docs/GOALS.proposed.sql
+//   • status — a LIFECYCLE field only, NOT an isolation key: 'open' (live) vs
+//     'completed' (done). It deliberately reuses the existing values rather
+//     than introducing 'active'. An earlier draft partitioned on status and
+//     needed the live user_goals_status_check widened to admit 'active'; that
+//     was dropped because origin already partitions both directions, so the
+//     widened CHECK bought a redundant second encoding at the cost of a
+//     one-way schema change. See docs/GOALS_ADDITIVE.proposed.sql.
+//
+// New columns this feature needs (APPLIED): docs/GOALS_ADDITIVE.proposed.sql
 //   user_goals.origin     text not null default 'cedrus_inferred'
 //   user_goals.priority   int  not null default 0
-//   user_goals.updated_at timestamptz
-//   week_of made nullable + status CHECK widened to allow 'active'
+// Nothing else changed: week_of stays NOT NULL and the status CHECK keeps its
+// original domain (open/completed/missed/canceled).
 //
 // THE VITAL FEW (Pareto's few-that-matter): a user may store UNLIMITED goals,
 // but focus is finite. selectVitalFew() is a PURE, deterministic ranking that
@@ -54,9 +58,12 @@ export const VITAL_FEW_MAX = 5;
 // Partition key: this service owns exactly the 'user_set' rows of user_goals.
 export const GOAL_ORIGIN = 'user_set';
 
-// Lifecycle for user-set goals. 'active' (deliberately NOT 'open' — see the
-// isolation note above) and 'completed'. A remove is a real delete.
-export const STATUS_ACTIVE = 'active';
+// Lifecycle for user-set goals: 'open' (live) and 'completed'. Both are values
+// the live user_goals_status_check already admits, so this feature needs no
+// constraint change. Isolation is origin's job, not status's — see the note
+// above. The constant keeps its STATUS_ACTIVE name because "active" is what a
+// live goal is called in the product; only the stored value is 'open'.
+export const STATUS_ACTIVE = 'open';
 export const STATUS_COMPLETED = 'completed';
 export const WRITABLE_STATUSES = [STATUS_ACTIVE, STATUS_COMPLETED];
 export const LIST_STATUSES = [STATUS_ACTIVE, STATUS_COMPLETED, 'all'];
@@ -73,7 +80,7 @@ export const MSG_TEXT_TOO_LONG = `Keep the goal under ${MAX_GOAL_TEXT_CHARS} cha
 export const MSG_SERVER_FIELDS = 'Some of those are mine to set. Send goal, and optionally priority, due_at, or person_id.';
 export const MSG_BAD_PATCH = 'Tell me what to change. I can update the goal, its priority, its due date, or mark it done.';
 export const MSG_BAD_PRIORITY = `Priority is a whole number from ${PRIORITY_MIN} to ${PRIORITY_MAX}.`;
-export const MSG_BAD_STATUS = 'I can set a goal to active or completed.';
+export const MSG_BAD_STATUS = 'I can set a goal to open or completed.';
 export const MSG_BAD_DUE = "I didn't understand that due date.";
 export const MSG_BAD_PERSON = "I couldn't find that person in your circle.";
 export const MSG_BAD_LIST_FILTER = "I don't recognize that filter.";
@@ -247,11 +254,19 @@ export async function addGoal({ user, body } = {}, deps = {}) {
   const dueAt = cleanDueAt(body.due_at);
   const personId = await cleanPersonId(db, user.id, body.person_id);
 
+  // week_of is stamped with the user's LOCAL creation week, exactly like
+  // memory.addGoal. A user-set goal is a standing goal rather than a weekly
+  // intention, so the value carries no meaning here — but the column is NOT
+  // NULL, and a NULL would be actively harmful even if it were allowed:
+  // memory.getOpenGoals orders `week_of DESC`, and Postgres sorts NULLS FIRST
+  // on DESC, so a null-week goal would land at [0] — precisely the brief slot
+  // this feature must never occupy. Populating it keeps that impossible by
+  // construction rather than by filter alone.
+  const weekOf = user.timezone ? localWeekOf(user.timezone) : mondayOf(new Date());
+
   // Insert every column explicitly (values match the DB defaults): the write
   // site documents the whole row, and the columns exist even on the test
-  // double, which runs no defaults. week_of is null on purpose — a user-set
-  // goal is a standing goal, not a weekly intention, and the weekly reads key
-  // on week_of + status='open'.
+  // double, which runs no defaults.
   const { data, error } = await db.from('user_goals').insert({
     user_id: user.id,
     person_id: personId,
@@ -260,7 +275,7 @@ export async function addGoal({ user, body } = {}, deps = {}) {
     priority,
     status: STATUS_ACTIVE,
     due_at: dueAt,
-    week_of: null,
+    week_of: weekOf,
     completed_at: null,
     created_at: nowIso(),
     updated_at: nowIso(),

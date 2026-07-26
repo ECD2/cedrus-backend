@@ -1,3 +1,19 @@
+-- ############################################################################
+-- SUPERSEDED — DO NOT RUN. Kept only as the record of a rejected approach.
+--
+-- This file additionally dropped week_of's NOT NULL and swapped
+-- user_goals_status_check to admit 'active'. Both were rejected: the isolation
+-- they existed to protect is enforced by `origin`, not `status` (goals.js
+-- scopes all six of its statements with .eq('origin','user_set'), and
+-- memory.getOpenGoals / getOpenGoalsThisWeek now filter
+-- .eq('origin','cedrus_inferred')). Widening a live CHECK bought a redundant
+-- second encoding at the cost of a one-way schema change.
+--
+-- WHAT WAS ACTUALLY RUN: docs/GOALS_ADDITIVE.proposed.sql (two ADD COLUMN
+-- IF NOT EXISTS, applied 2026-07-26). week_of remains NOT NULL and the status
+-- CHECK keeps its original domain.
+-- ############################################################################
+
 -- ============================================================================
 -- GOALS.proposed.sql   (PROPOSED — NOT EXECUTED)
 --

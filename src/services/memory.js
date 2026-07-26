@@ -155,11 +155,22 @@ export async function addGoal({ userId, personId, goalText, dueAt, sourceMessage
   if (error) throw error;
 }
 
+// user_goals holds two populations: this pipeline's auto-captured weekly
+// INTENTIONS (origin='cedrus_inferred', the default) and the standing goals a
+// person writes through /api/goals (origin='user_set', services/goals.js).
+// Both reads below feed the weekly brief, insights, and discovery, and
+// briefEngine takes getOpenGoals()[0] for the "did you reach out?" follow-up —
+// so a person-less life goal must never reach them. origin is the isolation
+// key in BOTH directions (goals.js filters origin='user_set' on every one of
+// its statements). Every pre-existing row carries the column DEFAULT, so this
+// filter is a no-op for historical data and excludes only user-set goals.
+const INFERRED_ORIGIN = 'cedrus_inferred';
+
 // Still-open intentions from prior weeks (for a soft "did you get to it?" aside).
 export async function getOpenGoals(userId) {
   const { data } = await supabase.from('user_goals')
     .select('id, goal_text, person_id, week_of, status')
-    .eq('user_id', userId).eq('status', 'open')
+    .eq('user_id', userId).eq('status', 'open').eq('origin', INFERRED_ORIGIN)
     .order('week_of', { ascending: false }).limit(5);
   return data || [];
 }
@@ -168,7 +179,8 @@ export async function getOpenGoals(userId) {
 export async function getOpenGoalsThisWeek(userId, weekOf) {
   const { data } = await supabase.from('user_goals')
     .select('id, goal_text, person_id, created_at')
-    .eq('user_id', userId).eq('status', 'open').eq('week_of', weekOf)
+    .eq('user_id', userId).eq('status', 'open').eq('origin', INFERRED_ORIGIN)
+    .eq('week_of', weekOf)
     .order('created_at', { ascending: true });
   return data || [];
 }

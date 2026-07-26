@@ -13,6 +13,7 @@ import importRouter from './routes/api/importRoutes.js';
 import interestsRouter from './routes/api/interests.js';
 import insightsRouter from './routes/api/insights.js';
 import remindersRouter from './routes/api/reminders.js';
+import goalsRouter from './routes/api/goals.js';
 import { corsMiddleware } from './lib/cors.js';
 import { startScheduler } from './jobs/scheduler.js';
 
@@ -47,6 +48,7 @@ app.use('/api/import', importRouter);   // NF2-IMPORT: chat-memory import (JWT, 
 app.use('/api/interests', interestsRouter); // NF2-SOURCES: user interests CRUD (JWT, self-carries json+requireUser) (MOUNT_SOURCES)
 app.use('/api/insights', insightsRouter); // INFRA-10: read-only insight engine feed (JWT, self-carries json+requireUser) (FLAGS_FROM_INSIGHTS)
 app.use('/api/reminders', remindersRouter); // UI-09: read-only upcoming reminders + delivery state (JWT, self-carries json+requireUser)
+app.use('/api/goals', goalsRouter); // INFRA-15: user-set goals CRUD + vital few (JWT, self-carries json+requireUser)
 app.use('/api', apiRouter);      // N3: web capture, priority swap, restore (MOUNT_N3)
 
 // eslint-disable-next-line no-unused-vars

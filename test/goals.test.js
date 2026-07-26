@@ -7,9 +7,10 @@
 //
 //   2. the store/read layer (add / list / update / remove / getVitalFew) over
 //      the reliability-core mock db: UNLIMITED storage, the load-bearing
-//      isolation (a user-set goal is origin='user_set' + status='active', so a
-//      read mimicking memory.getOpenGoals — .eq('status','open') — never sees
-//      it), ownership scoping (foreign id → 404, cross-tenant invisible),
+//      isolation (a user-set goal is origin='user_set'; status is lifecycle
+//      only, so a read mimicking memory.getOpenGoals — .eq('status','open')
+//      .eq('origin','cedrus_inferred') — never sees it, while status alone
+//      does NOT separate them), ownership scoping (foreign id → 404, cross-tenant invisible),
 //      origin scoping (the route can't touch a pipeline intention),
 //      server-owned field rejection, person_id ownership, and input validation.
 //
@@ -32,7 +33,7 @@
     id: o.id || uuid(++uidSeq),
     user_id: o.user_id || 'u1',
     origin: o.origin || 'user_set',
-    status: o.status || 'active',
+    status: o.status || 'open',
     priority: o.priority == null ? 0 : o.priority,
     goal_text: o.goal_text || 'g',
     person_id: o.person_id == null ? null : o.person_id,
@@ -116,22 +117,25 @@
   const user = { id: 'u1' };
   const other = { id: 'u2' };
 
-  // add: stores a user-set, active goal and returns a clean public shape ──────
-  println('add: stores an active user-set goal, unlimited, public shape only');
+  // add: stores a user-set, open goal and returns a clean public shape ────────
+  println('add: stores an open user-set goal, unlimited, public shape only');
   __reset();
   const added = await addGoal({ user, body: { goal_text: '  Run a half marathon  ' } });
   check('add returns created:true', added.created === true);
   check('add trims and stores the goal text', added.goal.goal_text === 'Run a half marathon');
   check('add defaults priority to 0', added.goal.priority === 0);
-  check('add sets status active', added.goal.status === 'active');
+  check('add sets status open', added.goal.status === 'open');
   check('add stamps created_at', typeof added.goal.created_at === 'string' && added.goal.created_at.length > 0);
   check('public shape hides user_id / origin / week_of',
     !('user_id' in added.goal) && !('origin' in added.goal) && !('week_of' in added.goal));
   // The stored row carries the isolation columns even though they never surface.
   const storedRow = __rows('user_goals').find((r) => r.id === added.goal.id);
   check('stored row is origin=user_set', storedRow.origin === 'user_set');
-  check('stored row is status=active (NOT open)', storedRow.status === 'active');
-  check('stored row week_of is null (not a weekly intention)', storedRow.week_of === null);
+  check('stored row is status=open (a value the live CHECK already admits)', storedRow.status === 'open');
+  // week_of is stamped, never null: memory.getOpenGoals orders week_of DESC and
+  // Postgres sorts NULLS FIRST on DESC, so a null would take the brief's [0] slot.
+  check('stored row week_of is a stamped YYYY-MM-DD, not null',
+    typeof storedRow.week_of === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(storedRow.week_of));
 
   // unlimited: no per-user cap ────────────────────────────────────────────────
   println('add: unlimited — no per-user storage cap');
@@ -151,7 +155,7 @@
   check('float priority → 422', await rejectedWith(() => addGoal({ user, body: { goal_text: 'g', priority: 1.5 } }), 422));
   check('out-of-range priority → 422', await rejectedWith(() => addGoal({ user, body: { goal_text: 'g', priority: 999 } }), 422));
   check('bad due_at → 422', await rejectedWith(() => addGoal({ user, body: { goal_text: 'g', due_at: 'someday' } }), 422));
-  check('server-owned field (status) → 422', await rejectedWith(() => addGoal({ user, body: { goal_text: 'g', status: 'active' } }), 422));
+  check('server-owned field (status) → 422', await rejectedWith(() => addGoal({ user, body: { goal_text: 'g', status: 'open' } }), 422));
   check('server-owned field (origin) → 422', await rejectedWith(() => addGoal({ user, body: { goal_text: 'g', origin: 'cedrus_inferred' } }), 422));
 
   // optional fields: priority, due_at, person_id ownership ─────────────────────
@@ -176,13 +180,13 @@
   println('list: default active-only, status filter, focus order');
   __reset();
   __seed('user_goals', [
-    seedRow({ goal_text: 'low', priority: 1, status: 'active' }),
-    seedRow({ goal_text: 'high', priority: 99, status: 'active' }),
+    seedRow({ goal_text: 'low', priority: 1, status: 'open' }),
+    seedRow({ goal_text: 'high', priority: 99, status: 'open' }),
     seedRow({ goal_text: 'mid', priority: 50, status: 'completed', completed_at: '2026-02-01T00:00:00Z' }),
   ]);
   const active = await listGoals({ user });
   check('default lists active only (completed excluded)',
-    active.goals.length === 2 && active.goals.every((g) => g.status === 'active'));
+    active.goals.length === 2 && active.goals.every((g) => g.status === 'open'));
   check('active list is in focus order (high before low)',
     eq(active.goals.map((g) => g.goal_text), ['high', 'low']));
   const completed = await listGoals({ user, status: 'completed' });
@@ -201,11 +205,21 @@
     goal_text: 'reach out to Ana', person_id: 'p-ana', week_of: '2026-07-20', created_at: '2026-07-20T00:00:00Z',
   }]);
   await addGoal({ user, body: { goal_text: 'user-set standing goal', priority: 80 } });
-  // The exact filter memory.getOpenGoals / getOpenGoalsThisWeek / relationships
-  // use: .eq('user_id').eq('status','open'). It must see ONLY the inferred row.
-  const openShaped = await supabase.from('user_goals').select('*')
+
+  // Both populations now share status='open' — status is a LIFECYCLE field, not
+  // the isolation key. Proving that explicitly, so nobody re-derives the old
+  // (false) claim that status separates them:
+  const statusOnly = await supabase.from('user_goals').select('*')
     .eq('user_id', 'u1').eq('status', 'open');
-  check('an .eq(status,open) read returns ONLY the inferred intention',
+  check('status alone does NOT separate the two populations (both are open)',
+    statusOnly.data.length === 2);
+
+  // The exact filter memory.getOpenGoals / getOpenGoalsThisWeek now use:
+  // .eq('user_id').eq('status','open').eq('origin','cedrus_inferred').
+  // ORIGIN is what makes the brief safe. It must see ONLY the inferred row.
+  const openShaped = await supabase.from('user_goals').select('*')
+    .eq('user_id', 'u1').eq('status', 'open').eq('origin', 'cedrus_inferred');
+  check('the real weekly-intention read returns ONLY the inferred intention',
     openShaped.data.length === 1 && openShaped.data[0].id === 'inferred-1');
   check("that read never returns the user-set goal (brief's getOpenGoals()[0] is safe)",
     !openShaped.data.some((r) => r.origin === 'user_set'));
@@ -222,7 +236,7 @@
   const gid = uuid(100);
   const infId = '44444444-4444-4444-4444-444444444444';
   __seed('user_goals', [
-    seedRow({ id: gid, goal_text: 'draft', priority: 10, status: 'active' }),
+    seedRow({ id: gid, goal_text: 'draft', priority: 10, status: 'open' }),
     seedRow({ id: infId, goal_text: 'intention', origin: 'cedrus_inferred', status: 'open' }),
   ]);
   const renamed = await updateGoal({ user, goalId: gid, patch: { goal_text: 'final', priority: 70 } });
@@ -230,11 +244,16 @@
   const doneG = await updateGoal({ user, goalId: gid, patch: { status: 'completed' } });
   check('complete sets status + stamps completed_at',
     doneG.goal.status === 'completed' && typeof doneG.goal.completed_at === 'string');
-  const reopened = await updateGoal({ user, goalId: gid, patch: { status: 'active' } });
-  check('reactivate clears completed_at', reopened.goal.status === 'active' && reopened.goal.completed_at === null);
+  const reopened = await updateGoal({ user, goalId: gid, patch: { status: 'open' } });
+  check('reactivate clears completed_at', reopened.goal.status === 'open' && reopened.goal.completed_at === null);
   check('empty patch → 422', await rejectedWith(() => updateGoal({ user, goalId: gid, patch: {} }), 422));
   check('unknown patch field → 422', await rejectedWith(() => updateGoal({ user, goalId: gid, patch: { color: 'red' } }), 422));
-  check('bad status → 422', await rejectedWith(() => updateGoal({ user, goalId: gid, patch: { status: 'open' } }), 422));
+  // 'missed' and 'canceled' are legal in the DB CHECK but deliberately NOT in
+  // WRITABLE_STATUSES: the API's writable set is narrower than the column's domain.
+  check('bad status (db-legal but not client-writable) → 422',
+    await rejectedWith(() => updateGoal({ user, goalId: gid, patch: { status: 'missed' } }), 422));
+  check('unknown status → 422',
+    await rejectedWith(() => updateGoal({ user, goalId: gid, patch: { status: 'archived' } }), 422));
   check('malformed id → 404', await rejectedWith(() => updateGoal({ user, goalId: 'nope', patch: { priority: 1 } }), 404));
   check('unknown id → 404', await rejectedWith(() => updateGoal({ user, goalId: '33333333-3333-3333-3333-333333333333', patch: { priority: 1 } }), 404));
   // Cannot mutate a pipeline intention through this route (origin scoped).
