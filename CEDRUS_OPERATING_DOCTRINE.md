@@ -122,6 +122,7 @@ claim.
 | **A parsing/format fix** | Before/after on the real reported inputs, showing old behavior and new behavior side by side. |
 | **A filter added to a shared query** | A regression run proving existing consumers see exactly the rows they saw before — with a guard that fails if the fixture returns nothing. |
 | **Graceful degradation** | Reproduce the actual failure condition (real SQLSTATE, real missing relation) and show the code surviving it — plus a test proving the catch isn't over-scoped. |
+| **A new test / regression guard** | **Revert the fix and show the suite goes RED**, then restore it. A test written against already-fixed code has never once been observed to fail, so its passing carries no information. Quote the mutation run's exit code. (Cheap: copy the file, revert, run, restore — under a minute.) |
 | **Arming a previously-inert guard** | Drive the REAL module against real prod through all three states — off, ON, and expired — **plus a control proving the "off" answer now comes from the healthy path and not the broken one.** For a boolean guard the two look identical, so reproducing the OLD failure signature side by side is the only thing that separates them. Then enumerate every consumer and confirm none of them can now break. |
 
 **The universal rule: run the control.** Whatever you think proves your claim, ask what result you
@@ -166,8 +167,17 @@ against the database or a real request, and update this section if reality has m
   Tests using real ESM imports or `mock.module` cannot run under it — register those in
   `run-all.sh` instead. `run-all.sh` invokes `run-tests.sh` first, so either way they execute
   inside the one gating battery.
-- **Bundle numbers in use: 17 (model-timestamps), 18 (interests), 19 (goals).** Next free: 20.
-  Station docs have claimed already-taken numbers more than once — check, don't trust.
+- **Bundle numbers in use: 17 (model-timestamps), 18 (interests), 19 (goals), 20 (§6 suppression
+  read).** Next free: **21.** Station docs have claimed already-taken numbers more than once —
+  check `test/run-tests.sh`, don't trust.
+- **The concat rig can host failure-branch tests — but not with `reliability-core.js`.** Its fake
+  Supabase is a working in-memory DB: it always resolves `{ error: null }` and can never throw, so
+  it cannot drive an error path. It also declares `const supabase`, so you cannot add your own
+  alongside it. For a suite that needs a *programmable* seam, write a dedicated prelude declaring
+  its own `supabase` / `logger` / `makeChecker` and skip `reliability-core.js` entirely
+  (`test/prelude-suppression.js` is the worked example; Bundle 16 set the precedent). This is
+  usually better than reaching for `mock.module`, which forces the suite out of the rig and into
+  `run-all.sh` and needs bun.
 - `run-all.sh` deliberately excludes the live extraction eval; it needs `OPENAI_API_KEY` and makes
   real paid calls. **Zero battery suites exercise the extraction prompt.**
 
@@ -237,9 +247,10 @@ against the database or a real request, and update this section if reality has m
   bumps `updated_at`, so a write test can never restore the table byte-for-byte.** Nothing in
   `src/` reads `app_users.updated_at`. Don't try to forge it back — that needs a trigger disable
   on a live table, which is riskier than the drift.
-- **No test anywhere imports the real `safetyFlags.js`.** Every consumer test injects its own
-  `isInSuppressionWindow` stub. Changing that file has near-zero risk of breaking the battery —
-  and correspondingly zero protection from it.
+- ~~No test anywhere imports the real `safetyFlags.js`~~ — **fixed the same day.** Bundle 20
+  (`test/suppression-read.test.js`) is the first suite to exercise it. Every OTHER suite still
+  injects its own `isInSuppressionWindow` stub, so coverage of that module is Bundle 20 and
+  nothing else: if you change `safetyFlags.js`, that bundle is the only thing standing under you.
 
 **Config**
 - `NODE_ENV` must be set to `production` on the Railway backend service. `assertSecureBoot()`
@@ -450,12 +461,12 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 | 7 | Interests frontend still on localStorage mock | Safe to wire now. Frontend change = live deploy, so it needs its own gated session. |
 | 8 | Onboarding infers the user's name from an open reply | The rebuild should ask for the name in its own explicit step. |
 | 9 | Extractor once emitted the same saved-item title for two different messages | Never root-caused, not currently reproducible. |
-| 10 | ~~The §6 crisis cooldown has never worked~~ **HALF-CLOSED 2026-07-26.** Column added, cooldown armed and proven end to end. | **What remains: `isInSuppressionWindow()` still has no logging at all**, so query-error / no-such-user / thrown-exception are still indistinguishable from a legitimate "no window" (Lesson 12). Awaiting Emil's decision on touching a Law-2 file — see flag 15. |
+| 10 | ~~The §6 crisis cooldown has never worked~~ **CLOSED 2026-07-26.** Column added and the cooldown proven end to end; the read now announces its abnormal branches and is covered by Bundle 20. | Closed at the root, not the surface: the instance (missing column) AND the shape (a `false` that couldn't say why) are both addressed. |
 | 11 | **`checkRateLimit()` fails OPEN with zero log output.** `getMessageQuota` discards `error`; `undefined` ⇒ `allowed: true` | Should an unreadable quota fail open or closed? Decide deliberately. Blast radius is uncapped OpenAI + Twilio spend per user. |
 | 12 | `days_since_contact` NULL-gated on the never-written `contact_frequency_days` | One-line view fix, but needs a real post-check that "Last touch" renders a value and that no consumer depends on the NULL. Also fix the unchecked `healthRes.error` at frontend `data.ts:197` — a latent second path to the identical symptom. |
 | 13 | "Nothing saved yet" is facts-only copy sitting above the saved-items panel | Copy/IA, not data. Scope the string to facts. |
 | 14 | 45 of 101 `supabase.from()` sites don't bind `error` | The generator of this whole class. A sweep, not an emergency — but track it as ONE item so it doesn't fragment into forty-five. |
-| 15 | `isInSuppressionWindow()` collapses 4 states into a silent `return false` | **DECISION NEEDED — Law 2 file.** ~8 lines: log the error and thrown branches, stay silent on the legitimate NULL branch, keep failing OPEN. Fail-closed was considered and rejected: a DB blip would then mute every user's content, trading one silent failure for a worse one. `logger` is already imported; no test imports this module, so battery risk is ~zero (and so is battery protection). |
+| 15 | ~~`isInSuppressionWindow()` collapses 4 states into a silent `return false`~~ **CLOSED 2026-07-26** under an explicit narrow Law-2 exception from Emil. | Logging only; control flow unchanged; still fails OPEN. Covered by Bundle 20 and mutation-checked. **The same shape is still live in flags 11 and 14** — this fixed one instance, not the class. |
 
 ---
 
@@ -463,6 +474,15 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 
 Append here when the doctrine changes. Date, what changed, why.
 
+- **2026-07-26 (late)** — Closed the §6 work at the root. `isInSuppressionWindow()` now logs its
+  three abnormal branches (query error / no user row / thrown) and stays silent on the legitimate
+  NULL branch; control flow unchanged, still fails OPEN. Made under an **explicit narrow Law-2
+  exception from Emil** — `isInSuppressionWindow` only; `safetyDetection.js` and `voiceGuard.js`
+  untouched. Added **Bundle 20**, the first suite anywhere to run the real `safetyFlags.js`, and
+  mutation-checked it (reverting the fix turns it red, exit 1). New Part 3 proof row: a new test
+  is not proof until you have watched it fail. Recorded that `reliability-core.js`'s fake Supabase
+  cannot drive error/throw branches, so failure-path suites need their own prelude. Flags 10 and
+  15 closed. Next free bundle: 21.
 - **2026-07-26 (evening)** — Armed the §6 crisis cooldown. One additive column
   (`app_users.crisis_suppressed_until`, timestamptz/nullable/no default) applied via the runner;
   **no code change, `safetyFlags.js` untouched (Law 2)**. Corrected the same-day Part 4 note that
