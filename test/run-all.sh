@@ -76,4 +76,9 @@ echo "=== INFRA-10 — insights API (feed / auth / entitlement tags) ==="
 bun test/insights-route.test.mjs
 
 echo ""
+echo "=== UI-09 — reminders read API (upcoming + delivery state) ==="
+# bun explicitly, not $RUNNER: the suite uses bun's mock.module.
+bun test/reminders-api.test.mjs
+
+echo ""
 echo "ALL BATTERY SUITES PASSED"
