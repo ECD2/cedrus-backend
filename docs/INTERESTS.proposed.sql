@@ -141,11 +141,14 @@ CREATE INDEX IF NOT EXISTS idx_interests_active_by_user
 --
 -- Ownership predicate: see the IDENTITY note in the header. interests.user_id =
 -- app_users.id, mapped from the JWT via app_users.auth_user_id — NOT auth.uid()
--- directly. Confirm this matches the live facts/people/dunbar_tier policies.
--- NOTE: the subquery reaches into app_users, so the authenticated role must be
--- able to read the mapping (app_users readable under its own RLS, or a
--- SECURITY DEFINER helper such as an auth-uid->app_user_id function). The live
--- browser-readable tables already solve this exact mapping — reuse their form.
+-- directly. CONFIRMED against the live schema (2026-07-25): public.facts and
+-- public.people both express exactly this mapping through the house helper
+-- public.user_owns_app_user(uuid) — a STABLE SECURITY DEFINER function that does
+-- `exists (select 1 from app_users u where u.id = $1 and u.auth_user_id = auth.uid())`.
+-- We reuse the helper rather than an inline subquery: being SECURITY DEFINER it
+-- resolves the mapping without requiring the authenticated role to read app_users
+-- under its own RLS, and it keeps one definition of ownership across all tables.
+-- (facts/people scope theirs FOR ALL; ours is deliberately FOR SELECT only.)
 -- ----------------------------------------------------------------------------
 ALTER TABLE interests ENABLE ROW LEVEL SECURITY;
 
@@ -156,7 +159,7 @@ CREATE POLICY interests_select_own ON interests
   FOR SELECT
   TO authenticated
   USING (
-    user_id IN (SELECT id FROM app_users WHERE auth_user_id = auth.uid())
+    user_owns_app_user(user_id)
   );
 
 -- Hide `confidence` from the browser: grant column-scoped SELECT on everything
