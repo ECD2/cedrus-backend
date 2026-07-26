@@ -74,7 +74,7 @@
   check('healthy → row', n && n.weekly_budget === 1, JSON.stringify(n));
   check('healthy → SILENT', __events.length === 0, JSON.stringify(__events));
 
-  println('\n── 5. checkRateLimit still FAILS OPEN — deliberately ──');
+  println('\n── 5. checkRateLimit still fails open — deliberately ──');
   __reset();
   __setTable('v_message_quota', { error: { code: '42P01', message: 'relation missing' } });
   let r = await checkRateLimit('u-err');
