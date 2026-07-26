@@ -168,4 +168,12 @@ run_js "$(bundle test/reliability-core.js src/services/discovery.js test/discove
 section "user-set goals"
 run_js "$(bundle test/reliability-core.js src/utils/time.js src/services/goals.js test/goals.test.js)"
 
+# ── Bundle 20: §6 suppression read — abnormal branches announce themselves ──
+# The FIRST suite to run the real src/services/safetyFlags.js (every other suite
+# stubs isInSuppressionWindow). Uses its own doubles rather than reliability-core:
+# that fake Supabase always resolves { error: null } and can never throw, and the
+# failure branches are the whole point here.
+section "§6 suppression read logging"
+run_js "$(bundle test/prelude-suppression.js src/services/safetyFlags.js test/suppression-read.test.js)"
+
 printf '\n✅ All test bundles passed.\n'

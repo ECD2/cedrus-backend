@@ -62,9 +62,21 @@ export async function openSuppressionWindow({ userId, category }) {
 }
 
 // Readable by downstream services later (§6). Returns false whenever the flag is
-// unavailable, so a not-yet-migrated schema fails OPEN for ordinary reminders/
+// unavailable, so a missing/unreadable flag fails OPEN for ordinary reminders/
 // tasks (which the spec says must keep working) and only gates promo content
 // when the flag genuinely exists and is active.
+//
+// The branches are split ONLY so the abnormal ones can announce themselves. The
+// control flow is unchanged: all four outcomes still return false, and it still
+// fails OPEN by design — failing closed would silently mute every user's brief
+// content on a transient DB blip, trading one silent failure for a broader one.
+//
+// This function was inert for its entire life because crisis_suppressed_until
+// did not exist, and a bare `return false` could not say so: "checked, no
+// window" and "couldn't check" were the same observation. The NULL branch stays
+// silent on purpose — it is the legitimate, overwhelmingly common answer, and
+// logging it would emit one line per user per job run, i.e. noise that gets
+// filtered, which is how the signal got lost in the first place.
 export async function isInSuppressionWindow(userId) {
   try {
     const { data, error } = await supabase
@@ -72,9 +84,21 @@ export async function isInSuppressionWindow(userId) {
       .select(SUPPRESSION_COLUMN)
       .eq('id', userId)
       .maybeSingle();
-    if (error || !data || !data[SUPPRESSION_COLUMN]) return false;
+    if (error) {
+      logger.warn('safetyFlags: suppression read FAILED — treating as NOT suppressed',
+        error.code || 'no_code', error.message || String(error));
+      return false;
+    }
+    if (!data) {
+      logger.warn('safetyFlags: suppression read found no app_users row — treating as NOT suppressed',
+        userId);
+      return false;
+    }
+    if (!data[SUPPRESSION_COLUMN]) return false; // legitimate "no window" — silence is correct
     return new Date(data[SUPPRESSION_COLUMN]).getTime() > Date.now();
-  } catch {
+  } catch (err) {
+    logger.warn('safetyFlags: suppression read THREW — treating as NOT suppressed',
+      (err && err.code) || 'no_code', (err && err.message) || String(err));
     return false;
   }
 }
