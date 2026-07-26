@@ -103,6 +103,34 @@ const CASES = [
       return errs;
     },
   },
+
+  // ── Station 2: a saved item's title must name the ACTIVITY, never restate the
+  // person it is already linked to. Observed live in prod: "Dinner with Luca
+  // Nannini" sat on Luca Nannini's own card, and "Coffee with Luca Moretti" on
+  // Moretti's. The person belongs in person_ref, not in the title.
+  {
+    name: 'saved-item title names the activity, not the attached person',
+    people: PEOPLE_BASE.concat([
+      { id: 'luca-n', name: 'Luca Nannini', aliases: ['Luca N'], relationship: 'friend', is_self: false },
+    ]),
+    recent: [],
+    body: 'Had dinner with Luca Nannini last night',
+    report: (out) => 'titles=' + JSON.stringify((out.saved_items || []).map((s) => s.title)),
+    checks: (out) => {
+      const errs = [];
+      const items = out.saved_items || [];
+      if (items.length === 0) return errs; // nothing saved is not this case's failure mode
+      for (const s of items) {
+        const title = String(s.title || '');
+        if (!title.trim()) { errs.push('empty title'); continue; }
+        // The bug: the person's name (or any part of it) inside the title.
+        if (/\bluca\b|\bnannini\b/i.test(title)) errs.push(`title restates the person: "${title}"`);
+        // The over-correction: stripping the person but leaving nothing useful.
+        if (title.trim().length < 3) errs.push(`title stripped to nothing useful: "${title}"`);
+      }
+      return errs;
+    },
+  },
 ];
 
 // ── emotional-register cases (Part 3): the reply must match the weight of the
