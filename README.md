@@ -1,3 +1,5 @@
+READ CEDRUS_OPERATING_DOCTRINE.md BEFORE STARTING ANY WORK.
+
 # Cedrus — Backend
 
 SMS-first relationship-memory agent. Twilio → this Node/Express app on Railway →
