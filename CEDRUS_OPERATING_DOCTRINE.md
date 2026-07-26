@@ -9,7 +9,7 @@ facts about this environment that sessions keep re-deriving wrong.
 If you are about to diagnose a problem, **check Part 4 and Part 5 first** — there is a real chance
 we have already seen it, already been wrong about it, and already written down the answer.
 
-Last updated: 2026-07-25.
+Last updated: 2026-07-26.
 
 ---
 
@@ -181,10 +181,51 @@ against the database or a real request, and update this section if reality has m
 - Frontend `createInterestsClient` (`src/lib/cedrus/interests.ts`) still returns a **localStorage
   mock**. That file is the single wiring point to the real endpoint.
 
+**Supabase client behaviour — the single most load-bearing fact in this file**
+- **`supabase-js` does NOT throw on a database error.** It resolves `{ data, error }`. Verified
+  2026-07-26: **45 of 101 `supabase.from()` call sites in `src/` never bind `error`.** Each is a
+  place where a DB failure yields no exception, no log, and a plausible return value.
+- **Corollary that has already bitten us:** a `try/catch` wrapped around a service function that
+  doesn't check `error` is **decorative — it can never fire.** `07_persist.js:97` wraps
+  `rel.logContact()` this way. Before trusting any catch on a write path, confirm the callee
+  actually converts `error` into a throw.
+- Which write paths genuinely throw: `memory.js` `addFact` / `addSavedItem` / `addReminder` /
+  `addGoal` (the post-incident fix, and it works). Which do **not**: the supersession `.update()`
+  inside `addFact` (`memory.js:80`), `relationships.js` `logContact` / `linkMessagePerson`,
+  `consent.js log`, `usage.js` `getMessageQuota` / `getNudgeUsage`, most of `people.js` and
+  `users.js`.
+
+**Contact tracking and the person panel** (verified live 2026-07-26)
+- `contact_events` **ARE** written on the saved-item path — Flag 3's premise was wrong. Written by
+  `relationships.js:12` from `07_persist.js:99`, gated on the model's `contact_signal` being one of
+  `explicit_contact / confirmed_contact / implied_contact`. The DB trigger correctly freshens
+  `people.last_contact_at`.
+- **`people.contact_frequency_days` has no writer anywhere** — not backend, not frontend, no column
+  default, 0 of 4 prod rows populated.
+- `v_people_for_agent.days_since_contact` is NULL-gated on **`contact_frequency_days`**, a field it
+  does not need: `WHEN last_contact_at IS NULL OR contact_frequency_days IS NULL THEN NULL`. The
+  guard is correct for `relationship_health_score` on the next line (it is the denominator) and was
+  copy-pasted onto the days-since branch. **Result: `days_since_contact` and the health bar are
+  NULL for every person of every user, permanently.** "Last touch: no record yet" is this, not a
+  write failure.
+- The two person panels read **different tables, and both are authoritative for what they show**:
+  WHAT CEDRUS KNOWS → `facts` (`is_current=true`); SAVED FOR LATER → `saved_items`
+  (`is_current=true`, `status IN ('active','surfaced')`). A dinner logged as an *event* lands in
+  `saved_items` and produces **no** `facts` row — so "Nothing saved yet" above a populated saved
+  list is accurate copy, not a bug.
+- `app_users.crisis_suppressed_until` **DOES NOT EXIST in prod** (full 39-column list pulled from
+  `information_schema`, 2026-07-26). Everything in `safetyFlags.js` that reads or writes it has
+  been inert since it shipped.
+
 **Config**
 - `NODE_ENV` must be set to `production` on the Railway backend service. `assertSecureBoot()`
   gates its hard failures on it; unset means several checks silently downgrade to warnings or
-  emit nothing at all.
+  emit nothing at all. **Verified set to `production` 2026-07-26**, alongside
+  `VALIDATE_TWILIO_SIGNATURE=true` and `PUBLIC_BASE_URL`. The guard is armed again — but it still
+  cannot announce which mode it ran in, so Lesson 7 stands.
+- `test/run-all.sh` prints **"ALL WS-B SUITES PASSED" roughly halfway through**, with six suites
+  still to run. `set -e` protects the exit code so the gate is sound — but that line is NOT proof
+  the battery passed. Quote the exit code, never that line.
 
 ---
 
@@ -312,7 +353,27 @@ emit nothing when disarmed — and the session said so.
 the correct approach.** Compliance that produces a wrong answer helps nobody. This has already
 saved us twice.
 
-### 11. Correct your own stale notes
+### 11. The library that never throws makes every catch a lie
+
+**Incident.** The Flag 1 census (2026-07-26) asked how many other guards could be silently inert.
+The answer was structural, not a list: `supabase-js` resolves `{ data, error }` instead of
+throwing, and 45 of 101 call sites never bind `error`. So the disease isn't 45 careless catches —
+it's one library contract that turns *every* unbound call into a silent-failure site, and turns
+some existing `try/catch` blocks into decoration that can never fire.
+
+Two guards were found actively broken and unable to say so: `isInSuppressionWindow()` returns
+`false` ("no crisis cooldown") because the column it reads doesn't exist, and `checkRateLimit()`
+returns `allowed: true` on any quota-query failure, with no log line at all.
+
+**Rule.** When auditing for silent failure, **start from the library contract, not the call sites.**
+Ask "what does this client do on error?" before reading a single catch block. One wrong assumption
+about a dependency's error model reproduces itself everywhere the dependency is used.
+
+**Corollary.** A guard that returns a boolean is the highest-risk shape in the codebase, because
+the failure value is almost always also a legitimate answer. `false` means both "checked, fine" and
+"couldn't check." Prefer three states, or log the mode.
+
+### 12. Correct your own stale notes
 
 **Incident.** A session recorded `interests` as missing from prod. It then ran the migration that
 created it — and went back and corrected the note, because a future session reading it would have
@@ -329,15 +390,20 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 
 | # | Flag | Root question |
 |---|---|---|
-| 1 | `assertSecureBoot()` can't distinguish "checked" from "didn't run" | Same disease as Lesson 1 — how many other guards in this codebase are silently inert? |
-| 2 | `NODE_ENV` root cause unknown | Who or what removed it? Only the Railway Activity feed can say. If a variable can vanish without an actor, others can too. |
-| 3 | "Last touch: no record yet" after a logged dinner | Are `contact_events` written on the saved-item path at all, or only on some paths? |
-| 4 | "Nothing saved yet" shown while SAVED FOR LATER lists items | Two panels reading different sources — which one is authoritative? |
+| 1 | **ANSWERED 2026-07-26.** `assertSecureBoot()` can't distinguish "checked" from "didn't run" | Census done — the answer was structural, see Lesson 11 and the new flags 10–13. `NODE_ENV` is set again, so this specific guard is armed. The *shape* is unfixed. |
+| 2 | `NODE_ENV` root cause unknown | Who or what removed it? Only the Railway Activity feed can say. If a variable can vanish without an actor, others can too. Still open — the variable is back, but nobody knows who took it. |
+| 3 | **CLOSED / DISPROVEN 2026-07-26.** "Last touch: no record yet" after a logged dinner | `contact_events` ARE written; `last_contact_at` IS set. Real cause is the `days_since_contact` NULL guard in `v_people_for_agent` — see flag 12. |
+| 4 | **CLOSED / NOT A BUG 2026-07-26.** "Nothing saved yet" while SAVED FOR LATER lists items | Different tables, both authoritative: `facts` vs `saved_items`. Prod had 0 facts and 3 saved items. It is a copy problem — see flag 13. |
 | 5 | Insights `gated` is tagged, not enforced | The frontend is the only thing preventing Pro content reaching free users. Needs a test that fails if a gated insight renders. |
 | 6 | Reminders has no entitlement model at all | Product decision, not a bug: free forever, or capped? Decide deliberately. |
 | 7 | Interests frontend still on localStorage mock | Safe to wire now. Frontend change = live deploy, so it needs its own gated session. |
 | 8 | Onboarding infers the user's name from an open reply | The rebuild should ask for the name in its own explicit step. |
 | 9 | Extractor once emitted the same saved-item title for two different messages | Never root-caused, not currently reproducible. |
+| 10 | **The §6 crisis cooldown has never worked.** `app_users.crisis_suppressed_until` does not exist in prod, so `isInSuppressionWindow()` always returns `false` = "not suppressed" | Highest-priority fix. Safety path, actively broken, structurally silent. Schema first (Lesson 6), then make the read fail closed or log. Needs its own gated session. |
+| 11 | **`checkRateLimit()` fails OPEN with zero log output.** `getMessageQuota` discards `error`; `undefined` ⇒ `allowed: true` | Should an unreadable quota fail open or closed? Decide deliberately. Blast radius is uncapped OpenAI + Twilio spend per user. |
+| 12 | `days_since_contact` NULL-gated on the never-written `contact_frequency_days` | One-line view fix, but needs a real post-check that "Last touch" renders a value and that no consumer depends on the NULL. Also fix the unchecked `healthRes.error` at frontend `data.ts:197` — a latent second path to the identical symptom. |
+| 13 | "Nothing saved yet" is facts-only copy sitting above the saved-items panel | Copy/IA, not data. Scope the string to facts. |
+| 14 | 45 of 101 `supabase.from()` sites don't bind `error` | The generator of this whole class. A sweep, not an emergency — but track it as ONE item so it doesn't fragment into forty-five. |
 
 ---
 
@@ -345,6 +411,13 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 
 Append here when the doctrine changes. Date, what changed, why.
 
+- **2026-07-26** — Moved into the `cedrus-backend` repo root and made load-bearing (`CLAUDE.md`,
+  `README.md`, `NOTES.md` all now open with a pointer to it). Added the silent-guard census results:
+  the `supabase-js` never-throws contract and the 45 unbound call sites (Part 4 + new Lesson 11),
+  the crisis-suppression column that doesn't exist, the `days_since_contact` NULL guard, and the
+  `run-all.sh` mid-script success line. Closed flags 3 and 4 — flag 3 was **disproven** (contact
+  events are written; the bug is a view guard) and flag 4 was **not a bug** (two panels, two
+  tables, both accurate). Answered flag 1. Opened flags 10–14. Renumbered old Lesson 11 to 12.
 - **2026-07-25** — Created after a day that began with three consecutive wrong diagnoses of a live
   silent-write incident and ended with six stations merged and deployed. Every lesson in Part 5 is
   from that day.
