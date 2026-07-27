@@ -168,7 +168,7 @@ against the database or a real request, and update this section if reality has m
   `run-all.sh` instead. `run-all.sh` invokes `run-tests.sh` first, so either way they execute
   inside the one gating battery.
 - **Bundle numbers in use: 17 (model-timestamps), 18 (interests), 19 (goals), 20 (§6 suppression
-  read), 21 (quota reads).** Next free: **22.** Station docs have claimed already-taken numbers more than once —
+  read), 21 (quota reads), 22 (crisis vs pre-model short-circuits).** Next free: **23.** Station docs have claimed already-taken numbers more than once —
   check `test/run-tests.sh`, don't trust.
 - **The concat rig can host failure-branch tests — but not with `reliability-core.js`.** Its fake
   Supabase is a working in-memory DB: it always resolves `{ error: null }` and can never throw, so
@@ -261,14 +261,30 @@ against the database or a real request, and update this section if reality has m
   anywhere in the backend (`config.enableJobs` is a manual global switch for jobs only). The real
   backstops are OpenAI's and Twilio's own account-level limits, which live outside this repo —
   verify them in those dashboards, don't assume the code has you covered.
-- **STAGE B3 runs BEFORE the Priority 0 crisis gate.** The safety detector lives *inside*
-  `understand()` (STAGE C, `pipeline/index.js:104`); the comment in `05_understand.js` about crisis
-  "short-circuiting earlier" means earlier *within* `understand()`, not earlier than the rate limit.
-  So `allowed:false` returns `MSG_RATE_LIMIT` and the crisis detector never runs. **This decides
-  the fail-open/fail-closed question for every quota guard on the inbound path: failing closed can
-  answer a crisis message with "you've hit your daily limit."** Cost is worth less than that.
-- Consequence worth its own flag: this is already reachable at the genuine 20/day cap, not just on
-  a DB error. See flag 16.
+- **The Priority 0 crisis gate lives INSIDE `understand()` (STAGE C).** The comment in
+  `05_understand.js` about crisis "short-circuiting earlier" means earlier *within* `understand()`,
+  not earlier than anything in the pipeline. Every early return above STAGE C therefore bypasses
+  crisis detection entirely. **This still decides the fail-open/fail-closed question for every
+  quota guard on the inbound path: failing closed can answer a crisis message with a cap message.**
+- **STAGE B2.5 (added 2026-07-26) is the fix.** `const crisisOverride = evaluateSafety(body).action
+  === 'crisis'` — pure, no model, no I/O — sits after compliance and gates the `needsFreshStart`
+  and STAGE B3 short-circuits. It deliberately builds NO reply: the crisis response is authored in
+  exactly one place, `understand()`'s gate, which re-runs the same pure function. Scope is
+  `'crisis'` only, NOT `isSafetyOverride()` (which also covers the substance `'boundary'`).
+- **The exemption cannot buy model calls.** The predicate that skips the cap is the same predicate
+  that makes `understand()` short-circuit pre-model, so a bypassed message can only ever cost one
+  fixed-template SMS. Bypass-scope and no-model-call are one condition, not two that could drift.
+- **`evaluateSafety()` is free enough to run anywhere.** `safetyDetection.js` has **zero imports**,
+  zero `async`, 457 lines of regex. Measured 2026-07-26: **5.94 µs** on a typical SMS, 2.39 µs on a
+  crisis hit (early exit), 78 µs at 1600 chars, 5.7 ms at the 100kb express limit. **Scaling is
+  linear — no catastrophic backtracking**, so it is safe to run on untrusted input before a rate
+  limit. For scale, the OpenAI call it protects takes 1–3 seconds.
+- The third pre-cap early return, `loneName`, is **not** reachable with crisis text — verified: a
+  crisis phrase never matches `bareName()` and a bare name never trips the detector. Bundle 22
+  asserts this so it stays true.
+- STOP/START/HELP (STAGE B2) still outrank the crisis pre-check, deliberately — opt-out is a legal
+  obligation. Note the carrier-mandated `HELP` reply is compliance boilerplate, which is what
+  someone texting "HELP" in distress receives. Not currently changeable.
 - Both quota reads now emit `quota.read.failed` (`error_category: 'db_error'`,
   `outcome: 'fail_open'`, `error_code`) on error OR missing row; healthy reads stay silent. The
   views are `... FROM app_users u`, so a missing row means the id isn't a user — abnormal in itself.
@@ -496,7 +512,7 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 | 13 | "Nothing saved yet" is facts-only copy sitting above the saved-items panel | Copy/IA, not data. Scope the string to facts. |
 | 14 | 45 of 101 `supabase.from()` sites don't bind `error` | The generator of this whole class. A sweep, not an emergency — but track it as ONE item so it doesn't fragment into forty-five. |
 | 15 | ~~`isInSuppressionWindow()` collapses 4 states into a silent `return false`~~ **CLOSED 2026-07-26** under an explicit narrow Law-2 exception from Emil. | Logging only; control flow unchanged; still fails OPEN. Covered by Bundle 20 and mutation-checked. **The same shape is still live in flags 11 and 14** — this fixed one instance, not the class. |
-| 16 | **A rate-limited user in crisis gets the cap message, not crisis resources.** STAGE B3 returns `MSG_RATE_LIMIT` before `understand()` runs Priority 0. | Reachable TODAY at the genuine 20/day cap — not a hypothetical. Pre-existing, found while costing flag 11, deliberately NOT fixed in that scope. Likely fix: run deterministic safety detection before the abuse cap, or exempt a message that trips the crisis regex. Safety-path change; needs its own gated session. |
+| 16 | ~~A rate-limited user in crisis gets the cap message~~ **CLOSED 2026-07-26.** STAGE B2.5 exempts a crisis message from both the cap AND the first-message onboarding return. | Scope turned out to be WIDER than filed: `needsFreshStart` was the worse path — a first-ever crisis message got the Twilio opt-in script. Both fixed, Bundle 22, mutation-checked. Residual risk accepted by Emil: a crisis message bypasses the cap, so fixed-template replies are uncapped (Twilio cost only, no model spend; inbound SMS costs the sender). |
 | 17 | No cost monitoring anywhere | `v_daily_token_usage` and `v_daily_sms_usage` exist with **zero consumers**. Nothing alerts on spend. `quota.read.failed` is now emitted but nothing consumes it either — an alert has to be wired somewhere for it to matter. |
 | 18 | No spend ceiling outside the app is verified | OpenAI and Twilio account-level caps are the only real backstops and they live outside this repo. Confirm they exist and are set before beta. |
 
@@ -506,6 +522,15 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 
 Append here when the doctrine changes. Date, what changed, why.
 
+- **2026-07-26 (last)** — Closed flag 16, and it was wider than filed: `needsFreshStart` returned
+  the Twilio opt-in script for a first-ever crisis message, which is worse than the cap case.
+  Added **STAGE B2.5** to `pipeline/index.js` — a pure `evaluateSafety(body).action === 'crisis'`
+  pre-check gating both short-circuits, building no reply so the crisis response keeps exactly one
+  author. Four functional lines. Benchmarked `evaluateSafety` (5.94 µs typical, linear scaling, no
+  ReDoS) to justify running it before a rate limit. Added **Bundle 22**; mutation-checked —
+  reverting `index.js` fails 10 assertions and prints the opt-in script as the reply to "i want to
+  kill myself". `safetyDetection.js` imported, never edited; import authorized by Emil. Next free
+  bundle: 23.
 - **2026-07-26 (latest)** — Closed flag 11. `getMessageQuota` / `getNudgeUsage` now emit a
   structured `quota.read.failed` event on error or missing row; healthy reads stay silent; return
   contracts and every verdict unchanged. **Kept failing OPEN deliberately** — the deciding factor
