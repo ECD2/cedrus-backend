@@ -9,7 +9,7 @@ facts about this environment that sessions keep re-deriving wrong.
 If you are about to diagnose a problem, **check Part 4 and Part 5 first** — there is a real chance
 we have already seen it, already been wrong about it, and already written down the answer.
 
-Last updated: 2026-07-26.
+Last updated: 2026-07-27.
 
 ---
 
@@ -127,6 +127,7 @@ claim.
 | **A parsing/format fix** | Before/after on the real reported inputs, showing old behavior and new behavior side by side. |
 | **A filter added to a shared query** | A regression run proving existing consumers see exactly the rows they saw before — with a guard that fails if the fixture returns nothing. |
 | **Graceful degradation** | Reproduce the actual failure condition (real SQLSTATE, real missing relation) and show the code surviving it — plus a test proving the catch isn't over-scoped. |
+| **Replacing a view** | The dependent views still exist and still return rows; the output column list is byte-identical (names, types, order); the branch you did NOT mean to change is byte-identical in `pg_get_viewdef` before and after — that sibling branch IS the control; and the new values are hand-verified against their inputs, not just "non-null". Capture the verbatim prior definition as a rollback artifact FIRST. |
 | **A new test / regression guard** | **Revert the fix and show the suite goes RED**, then restore it. A test written against already-fixed code has never once been observed to fail, so its passing carries no information. Quote the mutation run's exit code. (Cheap: copy the file, revert, run, restore — under a minute.) |
 | **Arming a previously-inert guard** | Drive the REAL module against real prod through all three states — off, ON, and expired — **plus a control proving the "off" answer now comes from the healthy path and not the broken one.** For a boolean guard the two look identical, so reproducing the OLD failure signature side by side is the only thing that separates them. Then enumerate every consumer and confirm none of them can now break. |
 
@@ -164,6 +165,16 @@ against the database or a real request, and update this section if reality has m
   `public` — the in-txn check then fails and it ROLLS BACK. It **fails closed**, so nothing lands
   and nothing is corrupted, but the migration silently does not apply. **Write table names
   unqualified**, as every prior `docs/*.proposed.sql` does. (Verified by hitting it, 2026-07-26.)
+- **`run-migration.mjs` CANNOT verify a `CREATE OR REPLACE VIEW`.** A view replacement declares no
+  CREATE TABLE / ADD COLUMN / CREATE INDEX, so `parseObjects` returns three empty lists, the in-txn
+  loop iterates nothing, and it prints "all declared objects present" — then COMMITs. It applies
+  the change and vouches for nothing. Write a purpose-built script (see
+  `~/.config/cedrus/migrate/apply-days-since.mjs` for the pattern: pre-check → BEGIN → apply →
+  in-txn asserts incl. a control → COMMIT/ROLLBACK → fresh post-check).
+- **`CREATE OR REPLACE VIEW` keeps dependents intact** as long as the output column list is
+  unchanged (or only appended to). `v_agent_person_context` sits on top of `v_people_for_agent`;
+  replacing the latter did not require dropping the former. Verified in-transaction 2026-07-27 —
+  assert it, don't assume it.
 - `run-migration.mjs` parses **only DDL objects** (CREATE TABLE / ADD COLUMN / CREATE INDEX).
   **Never feed it a data write.** It would run the UPDATE inside its transaction while pre-check,
   in-txn verify, and post-check all iterate empty lists and print "all declared objects present"
@@ -225,12 +236,23 @@ against the database or a real request, and update this section if reality has m
   `people.last_contact_at`.
 - **`people.contact_frequency_days` has no writer anywhere** — not backend, not frontend, no column
   default, 0 of 4 prod rows populated.
-- `v_people_for_agent.days_since_contact` is NULL-gated on **`contact_frequency_days`**, a field it
-  does not need: `WHEN last_contact_at IS NULL OR contact_frequency_days IS NULL THEN NULL`. The
-  guard is correct for `relationship_health_score` on the next line (it is the denominator) and was
-  copy-pasted onto the days-since branch. **Result: `days_since_contact` and the health bar are
-  NULL for every person of every user, permanently.** "Last touch: no record yet" is this, not a
-  write failure.
+- `v_people_for_agent.days_since_contact` was NULL-gated on **`contact_frequency_days`**, a field
+  it does not need. **FIXED IN PROD 2026-07-27** — that one condition removed from the days-since
+  branch only. Both Lucas now read `days_since_contact = 2`, hand-verified. Artifacts:
+  `docs/DAYS_SINCE_CONTACT.proposed.sql` and `.rollback.sql` (verbatim prior definition).
+- **`relationship_health_score` is STILL NULL for every person, and that is CORRECT.** Its guard on
+  `contact_frequency_days` is load-bearing — the field is its denominator
+  (`NULLIF(contact_frequency_days * 2, 0)`). It was deliberately not touched. The health bar and
+  the "drifting" pill therefore stay hidden, and the backend drift nudge / drift brief moment stay
+  dormant because both `gate on relationship_health_score == null → continue`, NOT on days-since.
+  The real remaining gap is that **nothing ever sets `contact_frequency_days`** — see flag 19.
+- **What the days-since fix woke up** (Lesson 7 enumeration, all verified by reading the consumers):
+  person-panel "Last touch" now shows a real value; `insights.js` **recency** insights can now fire
+  for the first time (core ≥14d, regular ≥30d) and flow into the weekly brief and `/api/insights`;
+  frontend `today.ts` drift moments can now fire (≥45d); `people.ts` row subtitle "no word since
+  {month}" can now appear (≥45d). Nothing treated NULL as an affirmative signal — every consumer
+  read it as "no data, skip" — so these are the features working for the first time, not
+  regressions. Backend drift nudges are NOT among them (health-gated, still dormant).
 - The two person panels read **different tables, and both are authoritative for what they show**:
   WHAT CEDRUS KNOWS → `facts` (`is_current=true`); SAVED FOR LATER → `saved_items`
   (`is_current=true`, `status IN ('active','surfaced')`). A dinner logged as an *event* lands in
@@ -513,13 +535,14 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 | 9 | Extractor once emitted the same saved-item title for two different messages | Never root-caused, not currently reproducible. |
 | 10 | ~~The §6 crisis cooldown has never worked~~ **CLOSED 2026-07-26.** Column added and the cooldown proven end to end; the read now announces its abnormal branches and is covered by Bundle 20. | Closed at the root, not the surface: the instance (missing column) AND the shape (a `false` that couldn't say why) are both addressed. |
 | 11 | ~~`checkRateLimit()` fails OPEN with zero log output~~ **CLOSED 2026-07-26.** Both quota reads now emit `quota.read.failed`; verdicts unchanged. | Answered deliberately: stays OPEN, because STAGE B3 precedes the Priority 0 crisis gate and failing closed could answer a crisis with the rate-limit template. Covered by Bundle 21, mutation-checked. **The spend ceiling is now observable, not enforced any harder — see flags 17 and 18.** |
-| 12 | `days_since_contact` NULL-gated on the never-written `contact_frequency_days` | One-line view fix, but needs a real post-check that "Last touch" renders a value and that no consumer depends on the NULL. Also fix the unchecked `healthRes.error` at frontend `data.ts:197` — a latent second path to the identical symptom. |
+| 12 | ~~`days_since_contact` NULL-gated on the never-written `contact_frequency_days`~~ **VIEW HALF CLOSED 2026-07-27.** Fixed in prod, hand-verified, health-score branch untouched as the control. | **Still open — the frontend half:** `healthRes.error` is unchecked at `data.ts:197` (`healthRes.data ?? []`), so a failed health query still renders "no record yet", indistinguishable from no data. Latent second path to the identical symptom. Frontend change = live deploy (Law 6), so it needs its own gated session. |
 | 13 | "Nothing saved yet" is facts-only copy sitting above the saved-items panel | Copy/IA, not data. Scope the string to facts. |
 | 14 | 45 of 101 `supabase.from()` sites don't bind `error` | The generator of this whole class. A sweep, not an emergency — but track it as ONE item so it doesn't fragment into forty-five. |
 | 15 | ~~`isInSuppressionWindow()` collapses 4 states into a silent `return false`~~ **CLOSED 2026-07-26** under an explicit narrow Law-2 exception from Emil. | Logging only; control flow unchanged; still fails OPEN. Covered by Bundle 20 and mutation-checked. **The same shape is still live in flags 11 and 14** — this fixed one instance, not the class. |
 | 16 | ~~A rate-limited user in crisis gets the cap message~~ **CLOSED 2026-07-26.** STAGE B2.5 exempts a crisis message from both the cap AND the first-message onboarding return. | Scope turned out to be WIDER than filed: `needsFreshStart` was the worse path — a first-ever crisis message got the Twilio opt-in script. Both fixed, Bundle 22, mutation-checked. Residual risk accepted by Emil: a crisis message bypasses the cap, so fixed-template replies are uncapped (Twilio cost only, no model spend; inbound SMS costs the sender). |
 | 17 | No cost monitoring anywhere | `v_daily_token_usage` and `v_daily_sms_usage` exist with **zero consumers**. Nothing alerts on spend. `quota.read.failed` is now emitted but nothing consumes it either — an alert has to be wired somewhere for it to matter. |
 | 18 | No spend ceiling outside the app is verified | OpenAI and Twilio account-level caps are the only real backstops and they live outside this repo. Confirm they exist and are set before beta. |
+| 19 | **Nothing ever sets `people.contact_frequency_days`** | Root cause behind the still-dead `relationship_health_score`, the hidden health bar, the "drifting" pill, and the dormant backend drift nudge + drift brief moment (all four gate on health being non-null). Unlike days-since this guard is CORRECT — the field is the score's denominator. So the fix is a product decision, not a view edit: who sets a per-person contact cadence, and what is the default? Probably derives from `dunbar_tier`. |
 
 ---
 
@@ -527,6 +550,17 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 
 Append here when the doctrine changes. Date, what changed, why.
 
+- **2026-07-27** — Corrected **Law 6** first: BOTH repos deploy on push (the Railway service is
+  repo-linked), where it previously said only the frontend did — which implied the backend was
+  safer. Then un-gated `days_since_contact` in `v_people_for_agent` (removed
+  `OR contact_frequency_days IS NULL` from that branch only). Applied to prod with a purpose-built
+  script because the runner's verification is vacuous for a view replacement; both Lucas now read
+  2 days, hand-verified; the health-score branch was the in-transaction control and is
+  byte-identical. Shipped a verbatim rollback artifact. Recorded that `CREATE OR REPLACE VIEW`
+  preserves dependents when the column list is unchanged, and added a Part 3 proof row for view
+  replacements. Enumerated what the fix wakes up (insights recency, frontend drift + row
+  subtitles). Flag 12's view half closed, frontend half still open; flag 19 opened for the
+  never-written `contact_frequency_days` behind the still-dead health score.
 - **2026-07-26 (last)** — Closed flag 16, and it was wider than filed: `needsFreshStart` returned
   the Twilio opt-in script for a first-ever crisis message, which is worse than the cap case.
   Added **STAGE B2.5** to `pipeline/index.js` — a pure `evaluateSafety(body).action === 'crisis'`
