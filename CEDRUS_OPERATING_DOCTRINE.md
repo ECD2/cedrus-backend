@@ -9,7 +9,7 @@ facts about this environment that sessions keep re-deriving wrong.
 If you are about to diagnose a problem, **check Part 4 and Part 5 first** — there is a real chance
 we have already seen it, already been wrong about it, and already written down the answer.
 
-Last updated: 2026-07-27.
+Last updated: 2026-07-27 (autonomous run).
 
 ---
 
@@ -184,7 +184,8 @@ against the database or a real request, and update this section if reality has m
   `run-all.sh` instead. `run-all.sh` invokes `run-tests.sh` first, so either way they execute
   inside the one gating battery.
 - **Bundle numbers in use: 17 (model-timestamps), 18 (interests), 19 (goals), 20 (§6 suppression
-  read), 21 (quota reads), 22 (crisis vs pre-model short-circuits).** Next free: **23.** Station docs have claimed already-taken numbers more than once —
+  read), 21 (quota reads), 22 (crisis vs pre-model short-circuits), 23 (relationships writes),
+  24 (memory silent failures), 25 (consent audit trail).** Next free: **26.** Station docs have claimed already-taken numbers more than once —
   check `test/run-tests.sh`, don't trust.
 - **The concat rig can host failure-branch tests — but not with `reliability-core.js`.** Its fake
   Supabase is a working in-memory DB: it always resolves `{ error: null }` and can never throw, so
@@ -221,13 +222,26 @@ against the database or a real request, and update this section if reality has m
   place where a DB failure yields no exception, no log, and a plausible return value.
 - **Corollary that has already bitten us:** a `try/catch` wrapped around a service function that
   doesn't check `error` is **decorative — it can never fire.** `07_persist.js:97` wraps
-  `rel.logContact()` this way. Before trusting any catch on a write path, confirm the callee
-  actually converts `error` into a throw.
-- Which write paths genuinely throw: `memory.js` `addFact` / `addSavedItem` / `addReminder` /
-  `addGoal` (the post-incident fix, and it works). Which do **not**: the supersession `.update()`
-  inside `addFact` (`memory.js:80`), `relationships.js` `logContact` / `linkMessagePerson`,
-  `consent.js log`, `usage.js` `getMessageQuota` / `getNudgeUsage`, most of `people.js` and
-  `users.js`.
+  `rel.logContact()` this way — still true after the 2026-07-27 sweep, which added logging but
+  deliberately did NOT start throwing. Before trusting any catch on a write path, confirm the
+  callee actually converts `error` into a throw.
+- Which write paths genuinely **throw**: `memory.js` `addFact` / `addSavedItem` / `addReminder` /
+  `addGoal` (the post-incident fix, and it works). Everything else resolves.
+- **Sweep progress (flag 14).** Eight call sites hardened as of 2026-07-27; the crude bind-count
+  moved 56 → 60 of 101. None changed control flow — they still resolve, they just say so now:
+  `usage.js` `getMessageQuota`/`getNudgeUsage` → `quota.read.failed`; `relationships.js`
+  `logContact`/`linkMessagePerson` → `relationships.write.failed`; `memory.js` supersession
+  `.update()` → `facts.supersede.failed`; `memory.js` `getOpenGoals`/`getOpenGoalsThisWeek` →
+  `goals.read.failed`; `consent.js log` → `consent.write.failed`. Bundles 21, 23, 24, 25, each
+  mutation-checked. **~41 sites remain**, mostly in `people.js` and `users.js`.
+- **`test/stubs.js`'s logger now carries `event`** — bundles 1/15/17 concatenate the real
+  `memory.js`, so any new `logger.*` method used there must be added to that stub or those three
+  bundles break. Same trap applies to `reliability-core.js`, which declares **no logger at all**.
+- **Next sweep candidate and its obstacle:** `briefEngine.js:355` (`catch { interests = [] }`,
+  whose comment still claims the interests table might be missing — it exists). `briefEngine.js`
+  does **not import logger**, and its two bundles (11, 12) use `reliability-core.js`, which
+  declares no logger. Hardening it means editing a shared prelude used by ~14 bundles — wider than
+  the sweep recipe covers. Deliberately deferred 2026-07-27.
 
 **Contact tracking and the person panel** (verified live 2026-07-26)
 - `contact_events` **ARE** written on the saved-item path — Flag 3's premise was wrong. Written by
@@ -278,6 +292,35 @@ against the database or a real request, and update this section if reality has m
   (`test/suppression-read.test.js`) is the first suite to exercise it. Every OTHER suite still
   injects its own `isInSuppressionWindow` stub, so coverage of that module is Bundle 20 and
   nothing else: if you change `safetyFlags.js`, that bundle is the only thing standing under you.
+
+**Rings, cadence, and the proactive layer** (established read-only 2026-07-27, flag 19 design pass)
+- **The ring selector is cosmetic today.** `dashboard.tsx:335` writes `dunbar_tier` +
+  `dunbar_tier_source='manual'`, and **`dunbar_tier` has ZERO references anywhere in the backend
+  `src/`.** Nothing reads it. The UI copy "Where someone sits sets how often Cedrus checks in about
+  them" is not true in any functional sense.
+- **`is_core_five` has no writer either.** `coreFive.js:recomputeCoreFive()` is a stub that
+  `throw new Error('TODO: implement...')`, and its two would-be importers have the import commented
+  out. So `is_core_five` is false for everyone forever unless set by hand.
+- **Consequence nobody had filed: on the FREE plan the proactive layer is entirely dead.**
+  `v_people_for_agent.proactive_enabled` is `plan=pro AND active` → `plan=trialing AND not expired`
+  → `is_core_five` → `is_self` → else false. A free, non-trial user has no pro branch and
+  `is_core_five` is always false, so every person evaluates to `proactive_enabled = false`. Both
+  current prod users are `trialing` (to 2026-08-06 / 08-08), so this is masked right now and will
+  surface the moment a trial lapses. See flag 22.
+- So the chain is dead in **four** independent places: ring not read → `is_core_five` never set →
+  `contact_frequency_days` never set → `relationship_health_score` NULL → both drift paths skip.
+  Fixing any one alone changes nothing.
+- **Health-score formula** (from `v_people_for_agent`):
+  `clamp(0..100, round(100 − days_since / (2 × contact_frequency_days) × 100))`. So 100 at 0 days,
+  50 at exactly one cadence, 0 at two. Drift (`< 60`) therefore fires at **0.8 ×** cadence and
+  urgent (`< 40`) at **1.2 ×**. Two quirks worth knowing before relying on it: it flags drift
+  *before* the cadence has actually elapsed, and it saturates at 0 by 2 × cadence, so someone 10 ×
+  overdue ranks identically to someone 2 × overdue in the nudge priority (the frontend re-sorts by
+  `daysSinceContact`, the backend does not). `NULLIF(freq * 2, 0)` also means a cadence of **0**
+  silently disables health for that person rather than erroring.
+- **All four prod people are `dunbar_tier='network'`** with `source='auto'`. Under the recommended
+  tier→cadence mapping (network ⇒ no cadence) that means a cadence rollout would activate for
+  **nobody** until Emil actually sorts people into rings — the safest possible arming path.
 
 **Spend, quotas, and the crisis ordering**
 - **`checkRateLimit()` is the ONLY per-user spend ceiling in the application.** It fronts the one
@@ -537,12 +580,15 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 | 11 | ~~`checkRateLimit()` fails OPEN with zero log output~~ **CLOSED 2026-07-26.** Both quota reads now emit `quota.read.failed`; verdicts unchanged. | Answered deliberately: stays OPEN, because STAGE B3 precedes the Priority 0 crisis gate and failing closed could answer a crisis with the rate-limit template. Covered by Bundle 21, mutation-checked. **The spend ceiling is now observable, not enforced any harder — see flags 17 and 18.** |
 | 12 | ~~`days_since_contact` NULL-gated on the never-written `contact_frequency_days`~~ **VIEW HALF CLOSED 2026-07-27.** Fixed in prod, hand-verified, health-score branch untouched as the control. | **Still open — the frontend half:** `healthRes.error` is unchecked at `data.ts:197` (`healthRes.data ?? []`), so a failed health query still renders "no record yet", indistinguishable from no data. Latent second path to the identical symptom. Frontend change = live deploy (Law 6), so it needs its own gated session. |
 | 13 | "Nothing saved yet" is facts-only copy sitting above the saved-items panel | Copy/IA, not data. Scope the string to facts. |
-| 14 | 45 of 101 `supabase.from()` sites don't bind `error` | The generator of this whole class. A sweep, not an emergency — but track it as ONE item so it doesn't fragment into forty-five. |
+| 14 | ~~45~~ **~41 of 101 `supabase.from()` sites don't bind `error`** | IN PROGRESS. Eight hardened (bundles 21/23/24/25, all mutation-checked): quota reads, `logContact`, `linkMessagePerson`, fact supersession, both goal reads, `consent.log`. Remainder is mostly `people.js` and `users.js`. Next candidate `briefEngine.js:355` is blocked on `reliability-core.js` having no logger — see Part 4. |
 | 15 | ~~`isInSuppressionWindow()` collapses 4 states into a silent `return false`~~ **CLOSED 2026-07-26** under an explicit narrow Law-2 exception from Emil. | Logging only; control flow unchanged; still fails OPEN. Covered by Bundle 20 and mutation-checked. **The same shape is still live in flags 11 and 14** — this fixed one instance, not the class. |
 | 16 | ~~A rate-limited user in crisis gets the cap message~~ **CLOSED 2026-07-26.** STAGE B2.5 exempts a crisis message from both the cap AND the first-message onboarding return. | Scope turned out to be WIDER than filed: `needsFreshStart` was the worse path — a first-ever crisis message got the Twilio opt-in script. Both fixed, Bundle 22, mutation-checked. Residual risk accepted by Emil: a crisis message bypasses the cap, so fixed-template replies are uncapped (Twilio cost only, no model spend; inbound SMS costs the sender). |
 | 17 | No cost monitoring anywhere | `v_daily_token_usage` and `v_daily_sms_usage` exist with **zero consumers**. Nothing alerts on spend. `quota.read.failed` is now emitted but nothing consumes it either — an alert has to be wired somewhere for it to matter. |
 | 18 | No spend ceiling outside the app is verified | OpenAI and Twilio account-level caps are the only real backstops and they live outside this repo. Confirm they exist and are set before beta. |
 | 19 | **Nothing ever sets `people.contact_frequency_days`** | Root cause behind the still-dead `relationship_health_score`, the hidden health bar, the "drifting" pill, and the dormant backend drift nudge + drift brief moment (all four gate on health being non-null). Unlike days-since this guard is CORRECT — the field is the score's denominator. So the fix is a product decision, not a view edit: who sets a per-person contact cadence, and what is the default? Probably derives from `dunbar_tier`. |
+| 20 | **Should `addFact` fail closed when supersession fails?** | DECISION NEEDED. Today the retirement failure is logged (`facts.supersede.failed`) and the insert proceeds, so the person can end up with two current values for a single-valued slot. Alternative is to abort the insert, which loses the user's newest correction instead. I chose "keep the correction, log loudly" as the lesser harm — but it is a real product call. |
+| 21 | **`coreFive.js:recomputeCoreFive()` is a `throw new Error('TODO')` stub** | `is_core_five` therefore has no writer at all. The monthly `0 3 1 * *` cron calls it — check whether that job is swallowing the throw every month, or never reaching it. |
+| 22 | **On the FREE plan the proactive layer is entirely dead** | `proactive_enabled` needs pro/trialing OR `is_core_five` OR `is_self`; with flag 21 unresolved, a lapsed-trial free user gets zero proactive content. Masked today because both prod users are trialing until early August. This is a launch blocker, not a bug. |
 
 ---
 
@@ -550,6 +596,16 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 
 Append here when the doctrine changes. Date, what changed, why.
 
+- **2026-07-27 (autonomous run)** — Flag 19 design pass, read-only: established that the ring
+  selector is cosmetic (`dunbar_tier` has no backend reader), that `is_core_five` has no writer at
+  all (`coreFive.js` is a TODO stub), and that consequently the free-plan proactive layer is dead —
+  filed as flags 21 and 22, neither previously known. Documented the health-score formula and its
+  two quirks. Continued the flag-14 sweep: hardened `relationships.js` ×2, `memory.js` ×3 and
+  `consent.js`, as bundles 23/24/25, each mutation-checked and each merged separately with a full
+  green battery (1590 PASS, safety 161). Deferred `briefEngine.js:355` because it needs a shared
+  prelude edit affecting ~14 bundles. Removed 9 merged worktrees under `.claude/worktrees/`.
+  Verified prod: `/health` 200, `environment="production"` on all 342 log lines, all 7 cron jobs
+  registered, zero error-level lines. Opened flag 20 (supersession fail-closed decision).
 - **2026-07-27** — Corrected **Law 6** first: BOTH repos deploy on push (the Railway service is
   repo-linked), where it previously said only the frontend did — which implied the backend was
   safer. Then un-gated `days_since_contact` in `v_people_for_agent` (removed
