@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase.js';
 import { mondayOf, localWeekOf } from '../utils/time.js';
+import { logger } from '../utils/logger.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CANONICAL FACT-SLOT REGISTRY — the single source of truth for "which fact keys
@@ -77,9 +78,26 @@ export async function addFact({ userId, personId, factType, factKey, factValue, 
     // Retire the canonical key AND its aliases, so pre-normalization rows
     // (e.g. an old relationship_status fact) are superseded too.
     const keysToRetire = [key, ...Object.keys(FACT_KEY_ALIASES).filter((a) => FACT_KEY_ALIASES[a] === key)];
-    await supabase.from('facts')
+    const { error: retireErr } = await supabase.from('facts')
       .update({ is_current: false, ended_at: new Date().toISOString(), ended_reason: 'superseded' })
       .eq('person_id', personId).in('fact_key', keysToRetire).eq('is_current', true);
+    // The insert below throws on error; this update did not even bind one. If
+    // retirement fails and the insert then succeeds, the person ends up with TWO
+    // current values for a single-valued slot — the "corrections stacked instead
+    // of superseding" bug, silently reintroduced. Control flow is deliberately
+    // unchanged here (the new fact still saves; losing the user's latest
+    // correction would be worse), so this log is the only thing standing between
+    // that invariant breaking and nobody knowing. See flag 20.
+    if (retireErr) {
+      logger.event('facts.supersede.failed', {
+        level: 'error', error_category: 'db_error', error_code: retireErr.code || 'unknown',
+        user_ref: 'u_' + userId, person_ref: 'p_' + personId,
+        outcome: 'invariant_at_risk',
+        message: `supersession of fact_key '${key}' failed; the incoming value will still be ` +
+          `inserted, so this person may now have MORE THAN ONE current value for that slot: ` +
+          (retireErr.message || String(retireErr)),
+      });
+    }
   }
   const { error } = await supabase.from('facts').insert({
     user_id: userId, person_id: personId, fact_type: factType, fact_key: key,
@@ -167,20 +185,38 @@ export async function addGoal({ userId, personId, goalText, dueAt, sourceMessage
 const INFERRED_ORIGIN = 'cedrus_inferred';
 
 // Still-open intentions from prior weeks (for a soft "did you get to it?" aside).
+// Both goal reads collapsed a failed query into `data || []` with the error
+// discarded — "this user has no open intentions" and "we could not find out"
+// were the same empty array. getOpenGoals feeds THREE consumers
+// (jobs/brief/gather.js, services/insights.js, services/discovery.js), so a
+// silent failure quietly drops the user's own stated intentions out of the
+// weekly brief with no trace. Still returns [] — degrading to a brief without
+// goals beats failing the brief — but it now says so.
+function reportGoalReadFailed(op, userId, error) {
+  logger.event('goals.read.failed', {
+    level: 'error', error_category: 'db_error', error_code: (error && error.code) || 'unknown',
+    user_ref: 'u_' + userId, outcome: 'degraded_empty',
+    message: `${op}: user_goals read failed; returning [] so the caller sees "no goals" — ` +
+      ((error && error.message) || String(error)),
+  });
+}
+
 export async function getOpenGoals(userId) {
-  const { data } = await supabase.from('user_goals')
+  const { data, error } = await supabase.from('user_goals')
     .select('id, goal_text, person_id, week_of, status')
     .eq('user_id', userId).eq('status', 'open').eq('origin', INFERRED_ORIGIN)
     .order('week_of', { ascending: false }).limit(5);
+  if (error) reportGoalReadFailed('getOpenGoals', userId, error);
   return data || [];
 }
 
 // Open intentions set THIS week (for the mid-week "did you reach out?" follow-up).
 export async function getOpenGoalsThisWeek(userId, weekOf) {
-  const { data } = await supabase.from('user_goals')
+  const { data, error } = await supabase.from('user_goals')
     .select('id, goal_text, person_id, created_at')
     .eq('user_id', userId).eq('status', 'open').eq('origin', INFERRED_ORIGIN)
     .eq('week_of', weekOf)
     .order('created_at', { ascending: true });
+  if (error) reportGoalReadFailed('getOpenGoalsThisWeek', userId, error);
   return data || [];
 }

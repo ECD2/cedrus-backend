@@ -42,7 +42,10 @@ const mondayOf = () => '2026-07-06';
 const localWeekOf = () => '2026-07-06';
 
 // services persist.js touches besides memory
-const logger = { info: () => {}, warn: (...a) => println('    [warn] ' + a.join(' ')), error: () => {} };
+// `event` is the structured lane; memory.js/relationships.js use it for
+// silent-failure reporting. Bundles 1/15/17 concatenate the real memory.js,
+// so this stub must carry every logger method those files can reach.
+const logger = { info: () => {}, warn: (...a) => println('    [warn] ' + a.join(' ')), error: () => {}, event: () => {} };
 const rel = {
   linkMessagePerson: async (args) => { __calls.linkMessagePerson.push(args); },
   logContact: async (args) => { __calls.logContact.push(args); },

@@ -215,4 +215,11 @@ run_js "$OUTX"
 section "relationships write logging"
 run_js "$(bundle test/prelude-relationships.js src/services/relationships.js test/relationships-write.test.js)"
 
+# ── Bundle 24: memory.js silent failures — supersession + goal reads ────────
+# Real memory.js over a per-OPERATION seam (addFact hits `facts` twice: update
+# then insert, and the point is failing the first while the second succeeds).
+# time.js is included because memory.js stamps week_of via localWeekOf/mondayOf.
+section "memory silent-failure reporting"
+run_js "$(bundle test/prelude-memory-silent.js src/utils/time.js src/services/memory.js test/memory-silent.test.js)"
+
 printf '\n✅ All test bundles passed.\n'
