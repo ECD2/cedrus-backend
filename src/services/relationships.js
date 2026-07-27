@@ -1,17 +1,48 @@
 import { supabase } from '../lib/supabase.js';
+import { logger } from '../utils/logger.js';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// supabase-js does NOT throw on a database error — it resolves { data, error }.
+// Both writes below discarded `error` entirely, which had a second consequence
+// worth stating: the try/catch wrapped around `logContact()` at 07_persist.js:97
+// is DECORATIVE. It can never fire for a Supabase error, because nothing here
+// ever throws one. A failed write was invisible at every layer.
+//
+// These are relationship memory, not bookkeeping. A lost contact_events row
+// means the DB trigger never freshens people.last_contact_at, so "Last touch"
+// silently stops advancing — and since 2026-07-27 that field is finally
+// user-visible on the person panel, so the failure now has a face.
+//
+// Logging only: both still resolve without throwing, so no caller changes and
+// the persist loop keeps its "one bad item can't poison the message" behaviour.
+// ─────────────────────────────────────────────────────────────────────────────
+function reportWriteFailed(op, table, userId, personId, error) {
+  logger.event('relationships.write.failed', {
+    level: 'error',
+    error_category: 'db_error',
+    error_code: (error && error.code) || 'unknown',
+    user_ref: 'u_' + userId,
+    person_ref: 'p_' + personId,
+    outcome: 'dropped',
+    message: `${op}: ${table} write failed and was DROPPED silently before this log existed: ` +
+      ((error && error.message) || String(error)),
+  });
+}
 
 export async function linkMessagePerson({ messageId, userId, personId, mentionText, contactSignal, sentiment, confidence }) {
-  await supabase.from('message_people').upsert({
+  const { error } = await supabase.from('message_people').upsert({
     message_id: messageId, user_id: userId, person_id: personId, mention_text: mentionText,
     contact_signal: contactSignal || 'none', sentiment: sentiment || null, confidence,
   }, { onConflict: 'message_id,person_id', ignoreDuplicates: true });
+  if (error) reportWriteFailed('linkMessagePerson', 'message_people', userId, personId, error);
 }
 
 // Inserting a contact_event trips the DB trigger that freshens people.last_contact_at.
 export async function logContact({ userId, personId, source = 'inferred', sourceMessageId = null, contactType = 'unknown' }) {
-  await supabase.from('contact_events').insert({
+  const { error } = await supabase.from('contact_events').insert({
     user_id: userId, person_id: personId, source, source_message_id: sourceMessageId, contact_type: contactType,
   });
+  if (error) reportWriteFailed('logContact', 'contact_events', userId, personId, error);
 }
 
 // Open a question Cedrus expects an answer to (called when a nudge/brief asks something).

@@ -208,4 +208,11 @@ OUTX="$(mktemp -t cedrus-tests).js"
 } > "$OUTX"
 run_js "$OUTX"
 
+# ── Bundle 23: relationship-memory writes announce their failures ───────────
+# Real relationships.js over a THENABLE table-aware seam (it awaits the builder
+# directly, no .maybeSingle() terminal). contact_events drives the trigger that
+# freshens people.last_contact_at — i.e. the person panel's "Last touch".
+section "relationships write logging"
+run_js "$(bundle test/prelude-relationships.js src/services/relationships.js test/relationships-write.test.js)"
+
 printf '\n✅ All test bundles passed.\n'
