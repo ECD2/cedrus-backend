@@ -298,9 +298,30 @@ against the database or a real request, and update this section if reality has m
   `dunbar_tier_source='manual'`, and **`dunbar_tier` has ZERO references anywhere in the backend
   `src/`.** Nothing reads it. The UI copy "Where someone sits sets how often Cedrus checks in about
   them" is not true in any functional sense.
-- **`is_core_five` has no writer either.** `coreFive.js:recomputeCoreFive()` is a stub that
-  `throw new Error('TODO: implement...')`, and its two would-be importers have the import commented
-  out. So `is_core_five` is false for everyone forever unless set by hand.
+- ~~`is_core_five` has no writer either~~ — **WRONG, corrected 2026-07-27.** `is_core_five` HAS a
+  live writer: the `set_priority_people(target_user_id, priority_person_ids, max_priority,
+  selection_source)` RPC (exists in prod, EXECUTE to service_role only), called by
+  `prioritySwap.js` from `POST /api/priority/swap`. The earlier claim came from grepping for
+  `update|insert`, which misses an `.rpc()` call — **grep for `.rpc(` too when hunting writers.**
+  The real gap is that **the frontend never calls that endpoint** (zero references to
+  `priority/swap`), so the writer exists and is unreachable from the UI.
+- `coreFive.js:recomputeCoreFive()` IS a `throw new Error('TODO')` stub, but it is the *auto*
+  fallback, not the primary path. **The throw is unreachable:** `runMonthlyCoreFive()` has its
+  import commented out and its body is only `logger.info('...not yet implemented')`. So the
+  `0 3 1 * *` cron has never failed — it succeeds at doing nothing. `trialDowngrade.js` is the same
+  shape, EXCEPT the downgrade itself is live and will flip both trials to `free` on Aug 6/8.
+- **Two disconnected notions of "the five".** `dunbar_tier` ('core'|'close'|'meaningful'|'network')
+  is written by the ring UI and has zero backend readers. `is_core_five` is what every backend
+  free-tier gate gets read from, and what the frontend maps to `isPriority` (`data.ts:82`).
+  `mapPerson` produces `circle` and `isPriority` from these two independent fields, and nothing
+  keeps them in sync — so dragging someone into "Inner 5" sets `dunbar_tier='core'` and leaves
+  `is_core_five` false, and the app's own `isPriority` does not reflect the ring just chosen.
+- **Nothing in the proactive layer sends SMS today.** `BRIEF_DRY_RUN=true` on Railway, and ALL
+  THREE outbound paths honour it: `weeklyBrief.js:77`, `dailySweeps.js:54`, `reminders.js:100`.
+  The only real outbound SMS is the synchronous TwiML reply to an inbound message. Arming the
+  proactive layer therefore takes TWO independent switches — populate `is_core_five` (decides what
+  content is selectable) AND set `BRIEF_DRY_RUN=false` (decides whether anything is sent). Neither
+  alone puts a message on the wire. Note briefs still make their OpenAI call under dry-run.
 - **Consequence nobody had filed: on the FREE plan the proactive layer is entirely dead.**
   `v_people_for_agent.proactive_enabled` is `plan=pro AND active` → `plan=trialing AND not expired`
   → `is_core_five` → `is_self` → else false. A free, non-trial user has no pro branch and
@@ -587,8 +608,8 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 | 18 | No spend ceiling outside the app is verified | OpenAI and Twilio account-level caps are the only real backstops and they live outside this repo. Confirm they exist and are set before beta. |
 | 19 | **Nothing ever sets `people.contact_frequency_days`** | Root cause behind the still-dead `relationship_health_score`, the hidden health bar, the "drifting" pill, and the dormant backend drift nudge + drift brief moment (all four gate on health being non-null). Unlike days-since this guard is CORRECT — the field is the score's denominator. So the fix is a product decision, not a view edit: who sets a per-person contact cadence, and what is the default? Probably derives from `dunbar_tier`. |
 | 20 | **Should `addFact` fail closed when supersession fails?** | DECISION NEEDED. Today the retirement failure is logged (`facts.supersede.failed`) and the insert proceeds, so the person can end up with two current values for a single-valued slot. Alternative is to abort the insert, which loses the user's newest correction instead. I chose "keep the correction, log loudly" as the lesser harm — but it is a real product call. |
-| 21 | **`coreFive.js:recomputeCoreFive()` is a `throw new Error('TODO')` stub** | `is_core_five` therefore has no writer at all. The monthly `0 3 1 * *` cron calls it — check whether that job is swallowing the throw every month, or never reaching it. |
-| 22 | **On the FREE plan the proactive layer is entirely dead** | `proactive_enabled` needs pro/trialing OR `is_core_five` OR `is_self`; with flag 21 unresolved, a lapsed-trial free user gets zero proactive content. Masked today because both prod users are trialing until early August. This is a launch blocker, not a bug. |
+| 21 | **`coreFive.js:recomputeCoreFive()` is a `throw new Error('TODO')` stub** | ANSWERED 2026-07-27: the throw is **unreachable** — `runMonthlyCoreFive()` never calls it (import commented out, body is a log line), so the cron has never failed. The stub is the *auto* fallback; the primary path is the user-chosen `set_priority_people` RPC, which works but is unreachable from the UI. |
+| 22 | **On the FREE plan the proactive layer is entirely dead** | Still true, but re-scoped 2026-07-27: it is currently moot because `BRIEF_DRY_RUN=true` means NOBODY gets proactive SMS. The live consequence on Aug 6/8 is **in-app**, not SMS — `today.ts` free-gates its drift feed on `isPriority` (= `is_core_five`), so the Today feed empties out. Fix is to wire the UI to `POST /api/priority/swap`, which already exists end to end. |
 
 ---
 
