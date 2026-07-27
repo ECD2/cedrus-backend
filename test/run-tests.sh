@@ -240,4 +240,11 @@ OUTCN="$(mktemp -t cedrus-tests).js"
 } > "$OUTCN"
 run_js "$OUTCN"
 
+# ── Bundle 26: trial downgrade — the job with a date attached ───────────────
+# Real trialDowngrade.js over a per-OPERATION seam (it hits app_users twice:
+# the expired-trial scan, then an update per user). Both live trials lapse
+# 2026-08-06 / 08-08, so a silent scan failure here has a deadline.
+section "trial downgrade silent-failure reporting"
+run_js "$(bundle test/prelude-trial-downgrade.js src/jobs/trialDowngrade.js test/trial-downgrade.test.js)"
+
 printf '\n✅ All test bundles passed.\n'
