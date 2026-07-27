@@ -44,7 +44,11 @@ const logger = {
   info: () => {}, warn: () => {}, error: () => {},
 };
 
-function __reset() { __events = []; __outcomes = {}; __writes = []; }
+function __reset() {
+  __events = []; __outcomes = {}; __writes = [];
+  // Bundle 25 declares __optOutCalls before this file's consumers run.
+  if (typeof __optOutCalls !== 'undefined') __optOutCalls.length = 0;
+}
 function __eventText(i) {
   const e = __events[i];
   return e ? e.name + ' ' + JSON.stringify(e.fields) : '';
