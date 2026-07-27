@@ -192,4 +192,20 @@ OUTQ="$(mktemp -t cedrus-tests).js"
 } > "$OUTQ"
 run_js "$OUTQ"
 
+# ── Bundle 22: crisis outranks the pre-model short-circuits (STAGE B2.5) ────
+# REAL safetyDetection.js + selfName.js + pipeline/index.js over service doubles.
+# Proves a first-ever crisis message gets 988 instead of the opt-in script, and a
+# capped one gets 988 instead of the cap message — while the cap still bites for
+# ordinary traffic and the model is never reached on either bypass.
+section "crisis outranks pre-model short-circuits"
+OUTX="$(mktemp -t cedrus-tests).js"
+{
+  cat test/prelude-crisis-cap.js
+  strip src/services/safetyDetection.js
+  strip src/pipeline/selfName.js
+  strip src/pipeline/index.js
+  cat test/crisis-before-cap.test.js
+} > "$OUTX"
+run_js "$OUTX"
+
 printf '\n✅ All test bundles passed.\n'
