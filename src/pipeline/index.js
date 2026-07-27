@@ -10,6 +10,7 @@ import { resolveEntities } from './06_resolveEntities.js';
 import { persist } from './07_persist.js';
 import * as clarifications from '../services/clarifications.js';
 import { isInSuppressionWindow } from '../services/safetyFlags.js';
+import { evaluateSafety } from '../services/safetyDetection.js';
 import { extractSelfName, bareName } from './selfName.js';
 
 // ═══════════════ ONBOARDING COPY — EDIT FREELY, NO CODE BELOW CHANGES ═══════════════
@@ -47,11 +48,37 @@ export async function runInboundPipeline({ from, body, messageSid, numSegments }
     return compliance.reply; // STOP → null reply; carrier sends its own confirmation
   }
 
+  // ── STAGE B2.5 — Priority 0 pre-check ──────────────────────────────────────
+  // Pure, ~6µs, no model call and no I/O: evaluateSafety() is a regex pass over
+  // the raw body (safetyDetection.js has zero imports). It decides ONE thing —
+  // whether the cost/onboarding short-circuits below are allowed to fire.
+  //
+  // It deliberately does NOT build a reply. The crisis response is authored in
+  // exactly one place, understand()'s Priority 0 gate, which re-runs this same
+  // pure function on the same body and short-circuits to the fixed, versioned
+  // template. Two copies of that response would be two things to keep in sync.
+  //
+  // Why this exists: the short-circuits below return BEFORE STAGE C, so without
+  // this a crisis message could never reach crisis detection at all. A first-ever
+  // message got the opt-in boilerplate; a capped user got "you've reached today's
+  // limit" — for up to 24 hours. Both are now exempt.
+  //
+  // Scope is 'crisis' only, NOT isSafetyOverride() (which also covers the
+  // substance-guidance 'boundary'). A boundary reply is a refusal, not a
+  // life-safety resource, so it stays subject to the cap and keeps the bypass
+  // surface as small as it can be.
+  //
+  // This cannot be used to get free model calls: the same predicate that skips
+  // the cap guarantees understand() short-circuits before the OpenAI call. The
+  // most it can buy is a fixed template. Compliance (STOP) still outranks it —
+  // that gate is above this line and stays there.
+  const crisisOverride = evaluateSafety(body).action === 'crisis';
+
   // New user OR an admin-reset user (same account row, zero history) → the
   // EXACT Twilio-approved opt-in text, verbatim, first and alone. It already
   // ends by asking "who's someone important in your life?", so we don't ask
   // a separate onboarding question on top of it.
-  if (needsFreshStart) {
+  if (needsFreshStart && !crisisOverride) {
     await messages.logOutbound({ userId: user.id, body: MSG_COMPLIANCE, messageType: 'onboarding' });
     return MSG_COMPLIANCE;
   }
@@ -93,9 +120,13 @@ export async function runInboundPipeline({ from, body, messageSid, numSegments }
     // actual content the model should extract right now.
   }
 
-  // STAGE B3 — abuse cap (cost survival; runs before any model call)
+  // STAGE B3 — abuse cap (cost survival; runs before any model call).
+  // Exempt for a crisis message (STAGE B2.5): the cap must never be the reason
+  // someone in crisis gets boilerplate instead of 988. The exemption is safe
+  // because a crisis message short-circuits inside understand() before the
+  // model call, so it can only ever cost one fixed-template SMS.
   const { allowed } = await checkRateLimit(user.id);
-  if (!allowed) {
+  if (!allowed && !crisisOverride) {
     const reply = MSG_RATE_LIMIT;
     await messages.logOutbound({ userId: user.id, body: reply, messageType: 'system' });
     return reply;
