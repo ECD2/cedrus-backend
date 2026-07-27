@@ -94,8 +94,13 @@ These do not bend. If an instruction conflicts with one, say so rather than foll
    results are advisory. A battery that passed before the merge proves nothing about after it.
 4. **One merge at a time.** Never batch. Battery between each.
 5. **STOP before push. Only Emil pushes.** No deploys, no migrations without explicit go.
-6. **Frontend push = live deploy.** cedrus-frontend is on Lovable; pushing main ships to users.
-   Treat every frontend merge accordingly.
+6. **BOTH repos deploy on push. There is no "safe" repo.** cedrus-frontend is on Lovable, and the
+   cedrus-backend Railway service is **repo-linked to `ECD2/cedrus-backend`** — pushing `main` in
+   EITHER repo ships to users. Verified 2026-07-26: a backend push auto-built and was live in
+   production in ~50 seconds, with no separate deploy step. This law previously said only
+   "frontend push = live deploy", which wrongly implied the backend was safer. Treat every merge
+   to main, in either repo, as a release — and note a DB view/migration is even more immediate
+   than that: it changes live behaviour with no deploy at all.
 7. **`.env.production` is sacred.** 3 lines, sha256 starts `6b2955d3` ends `549cd5`. Byte-check
    before and after any frontend work, and again after any build step.
 8. **Migrations run through the runner**, never by hand:
