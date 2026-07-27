@@ -222,4 +222,22 @@ run_js "$(bundle test/prelude-relationships.js src/services/relationships.js tes
 section "memory silent-failure reporting"
 run_js "$(bundle test/prelude-memory-silent.js src/utils/time.js src/services/memory.js test/memory-silent.test.js)"
 
+# ── Bundle 25: consent audit trail announces its failures ───────────────────
+# Reuses the Bundle 23 prelude (thenable, table-aware). Runs the REAL
+# handleCompliance so the load-bearing ordering is pinned: setOptedOut()
+# enforces the opt-out BEFORE the audit write, so a lost consent_events row
+# never means an unhonoured STOP.
+section "consent audit-trail logging"
+OUTCN="$(mktemp -t cedrus-tests).js"
+{
+  cat test/prelude-relationships.js
+  echo 'let __optOutCalls = [];'
+  echo 'const users = { setOptedOut: async (id, value) => { __optOutCalls.push({ id, value }); } };'
+  strip src/services/consent.js
+  echo 'const consent = { log };'
+  strip src/pipeline/03_compliance.js
+  cat test/consent-write.test.js
+} > "$OUTCN"
+run_js "$OUTCN"
+
 printf '\n✅ All test bundles passed.\n'
