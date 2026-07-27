@@ -185,7 +185,8 @@ against the database or a real request, and update this section if reality has m
   inside the one gating battery.
 - **Bundle numbers in use: 17 (model-timestamps), 18 (interests), 19 (goals), 20 (§6 suppression
   read), 21 (quota reads), 22 (crisis vs pre-model short-circuits), 23 (relationships writes),
-  24 (memory silent failures), 25 (consent audit trail).** Next free: **26.** Station docs have claimed already-taken numbers more than once —
+  24 (memory silent failures), 25 (consent audit trail), 26 (trial downgrade).**
+  Next free: **27.** Station docs have claimed already-taken numbers more than once —
   check `test/run-tests.sh`, don't trust.
 - **The concat rig can host failure-branch tests — but not with `reliability-core.js`.** Its fake
   Supabase is a working in-memory DB: it always resolves `{ error: null }` and can never throw, so
@@ -227,13 +228,14 @@ against the database or a real request, and update this section if reality has m
   callee actually converts `error` into a throw.
 - Which write paths genuinely **throw**: `memory.js` `addFact` / `addSavedItem` / `addReminder` /
   `addGoal` (the post-incident fix, and it works). Everything else resolves.
-- **Sweep progress (flag 14).** Eight call sites hardened as of 2026-07-27; the crude bind-count
+- **Sweep progress (flag 14).** TEN call sites hardened as of 2026-07-27; the crude bind-count
   moved 56 → 60 of 101. None changed control flow — they still resolve, they just say so now:
   `usage.js` `getMessageQuota`/`getNudgeUsage` → `quota.read.failed`; `relationships.js`
   `logContact`/`linkMessagePerson` → `relationships.write.failed`; `memory.js` supersession
   `.update()` → `facts.supersede.failed`; `memory.js` `getOpenGoals`/`getOpenGoalsThisWeek` →
-  `goals.read.failed`; `consent.js log` → `consent.write.failed`. Bundles 21, 23, 24, 25, each
-  mutation-checked. **~41 sites remain**, mostly in `people.js` and `users.js`.
+  `goals.read.failed`; `consent.js log` → `consent.write.failed`; `trialDowngrade.js` scan +
+  per-user update → `trial.downgrade.scan_failed` / `trial.downgrade.failed`. Bundles 21, 23, 24,
+  25, 26, each mutation-checked. **~39 sites remain**, mostly in `people.js` and `users.js`.
 - **`test/stubs.js`'s logger now carries `event`** — bundles 1/15/17 concatenate the real
   `memory.js`, so any new `logger.*` method used there must be added to that stub or those three
   bundles break. Same trap applies to `reliability-core.js`, which declares **no logger at all**.
@@ -342,6 +344,28 @@ against the database or a real request, and update this section if reality has m
 - **All four prod people are `dunbar_tier='network'`** with `source='auto'`. Under the recommended
   tier→cadence mapping (network ⇒ no cadence) that means a cadence rollout would activate for
   **nobody** until Emil actually sorts people into rings — the safest possible arming path.
+
+**The trial→free transition** (verified read-only 2026-07-27; both live trials lapse Aug 6 / Aug 8)
+- **The downgrade job WILL work.** Proven by running the real UPDATE inside a transaction and
+  rolling it back: `user_plan` contains `'free'`, no CHECK constraint blocks it, the write returns
+  `plan='free'`, and prod was verified untouched afterwards. `service_role` has UPDATE on
+  `app_users`. The scan predicate (`plan='trialing' AND trial_ends_at < now()`) currently matches
+  0 rows, correctly. The job is idempotent — after the write the scan can't match that user again.
+  It runs hourly at `:30`, so worst-case lag past expiry is ~1 hour.
+- **It leaves `billing_status='trialing'` on a `plan='free'` user.** Harmless for entitlements —
+  every `planTier()` pro-branch requires `plan==='pro'` too — but it is surfaced in the admin user
+  list (`adminOps.js:83`), where "free / trialing" reads as a bug. Cosmetic, not functional.
+- **SPLIT-BRAIN RISK — the SQL and JS entitlement checks disagree when the job doesn't run.**
+  `v_people_for_agent.proactive_enabled` is time-aware: `plan='trialing' AND trial_ends_at > now()`.
+  `planTier()` — duplicated in **five** places (`sweeps/select.js:78`, `brief/select.js:119`,
+  `briefEngine.js:64`, `discovery.js:120`, `insights.js:89`) — is **not**: it returns `'trial'` for
+  `plan==='trialing'` with no clock check. So the view self-corrects the instant a trial expires,
+  while the JS keeps granting trial entitlements until the cron rewrites the column. If the
+  downgrade silently no-ops, `proLike` stays true and the free-tier gates at `sweeps/select.js:36`
+  and `:47` never engage — the user keeps trial-breadth goal follow-ups and birthday nudges
+  indefinitely, while the same user's `proactive_enabled` reads false. See flag 23.
+- Nothing else keys off the transition: no email, no notification, no Stripe call, and the
+  `coreFive.recomputeCoreFive()` call is commented out (flag 21).
 
 **Spend, quotas, and the crisis ordering**
 - **`checkRateLimit()` is the ONLY per-user spend ceiling in the application.** It fronts the one
@@ -610,6 +634,7 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 | 20 | **Should `addFact` fail closed when supersession fails?** | DECISION NEEDED. Today the retirement failure is logged (`facts.supersede.failed`) and the insert proceeds, so the person can end up with two current values for a single-valued slot. Alternative is to abort the insert, which loses the user's newest correction instead. I chose "keep the correction, log loudly" as the lesser harm — but it is a real product call. |
 | 21 | **`coreFive.js:recomputeCoreFive()` is a `throw new Error('TODO')` stub** | ANSWERED 2026-07-27: the throw is **unreachable** — `runMonthlyCoreFive()` never calls it (import commented out, body is a log line), so the cron has never failed. The stub is the *auto* fallback; the primary path is the user-chosen `set_priority_people` RPC, which works but is unreachable from the UI. |
 | 22 | **On the FREE plan the proactive layer is entirely dead** | Still true, but re-scoped 2026-07-27: it is currently moot because `BRIEF_DRY_RUN=true` means NOBODY gets proactive SMS. The live consequence on Aug 6/8 is **in-app**, not SMS — `today.ts` free-gates its drift feed on `isPriority` (= `is_core_five`), so the Today feed empties out. Fix is to wire the UI to `POST /api/priority/swap`, which already exists end to end. |
+| 23 | **`planTier()` is not time-aware, but the view is** | Duplicated in 5 files; all return `'trial'` for `plan='trialing'` regardless of `trial_ends_at`, while `v_people_for_agent` checks the clock. A silently-failed downgrade therefore grants trial entitlements forever in JS while SQL says otherwise. Cheapest fix: add the `trial_ends_at > now()` check to `planTier()` so entitlement stops depending on a cron having run. Consider collapsing the five copies into one helper at the same time. |
 
 ---
 
@@ -617,6 +642,14 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 
 Append here when the doctrine changes. Date, what changed, why.
 
+- **2026-07-27 (trial-downgrade sweep)** — Hardened `trialDowngrade.js`, the flag-14 site with a
+  date on it: both the expired-trial scan and the per-user update now report
+  (`trial.downgrade.scan_failed` / `trial.downgrade.failed`), and the summary line counts rows
+  CHANGED instead of rows FOUND — it previously logged "Downgraded 2 expired trial(s)" even when
+  every update failed. Bundle 26, mutation-checked, battery green (1613 PASS). Then traced the
+  transition read-only and confirmed the job will work on Aug 6/8 by running the real UPDATE inside
+  a rolled-back transaction. Found and filed flag 23: `planTier()` is not time-aware while the view
+  is, so a silently-failed downgrade grants trial entitlements indefinitely in JS.
 - **2026-07-27 (autonomous run)** — Flag 19 design pass, read-only: established that the ring
   selector is cosmetic (`dunbar_tier` has no backend reader), that `is_core_five` has no writer at
   all (`coreFive.js` is a TODO stub), and that consequently the free-plan proactive layer is dead —
