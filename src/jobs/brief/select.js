@@ -1,3 +1,4 @@
+import { planTier, isProLike } from '../../services/entitlements.js';
 import { daysUntilBirthday } from '../../utils/time.js';
 
 // Tunables — adjust from real briefs once they're flowing.
@@ -17,7 +18,7 @@ const MAX_MOMENTS = 3;            // keep the brief tight; curation > completene
 // the closing question are ordinary brief content and keep flowing.
 export function selectBriefItems(user, candidates, { suppressPromo = false } = {}) {
   const tier = planTier(user);
-  const proLike = tier === 'pro' || tier === 'trial';
+  const proLike = isProLike(tier);
   const offerActions = proLike && !suppressPromo;
 
   const ctx = candidates.context || [];
@@ -115,11 +116,6 @@ export function selectBriefItems(user, candidates, { suppressPromo = false } = {
 
 // ── helpers ──────────────────────────────────────────────────────────
 
-function planTier(user) {
-  if (user.plan === 'pro' && user.billing_status === 'active') return 'pro';
-  if (user.plan === 'trialing') return 'trial';
-  return 'free';
-}
 
 function onePerPerson(sorted) {
   const seen = new Set();

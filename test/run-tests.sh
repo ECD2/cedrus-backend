@@ -85,27 +85,27 @@ run_js "$(bundle test/reliability-core.js test/prelude-twilio.js src/lib/twilio.
 
 # ── Bundle 8: §6 suppression window — brief promo layer ─────────────────────
 section "brief §6 suppression"
-run_js "$(bundle test/reliability-core.js src/jobs/brief/select.js test/brief-suppression.test.js)"
+run_js "$(bundle test/reliability-core.js src/services/entitlements.js src/jobs/brief/select.js test/brief-suppression.test.js)"
 
 # ── Bundle 9: §6 suppression window — sweep playful layer ───────────────────
 section "sweep §6 suppression"
-run_js "$(bundle test/reliability-core.js src/jobs/sweeps/select.js test/sweep-suppression.test.js)"
+run_js "$(bundle test/reliability-core.js src/services/entitlements.js src/jobs/sweeps/select.js test/sweep-suppression.test.js)"
 
 # ── Bundle 10: insight engine — pure ranking core + read-layer wiring ───────
 section "insight engine"
-run_js "$(bundle test/reliability-core.js src/services/insights.js test/insights.test.js)"
+run_js "$(bundle test/reliability-core.js src/services/entitlements.js src/services/insights.js test/insights.test.js)"
 
 # ── Bundle 11: brief engine — pure select/compose/first-brief + read layer ──
 section "brief engine"
-run_js "$(bundle test/reliability-core.js src/services/briefEngine.js test/brief-engine.test.js)"
+run_js "$(bundle test/reliability-core.js src/services/entitlements.js src/services/briefEngine.js test/brief-engine.test.js)"
 
 # ── Bundle 12: brief engine — REAL insights.js feeds the brief end to end ────
 section "brief engine wiring (real insights.js)"
-run_js "$(bundle test/reliability-core.js src/services/insights.js src/services/briefEngine.js test/brief-engine-wiring.test.js)"
+run_js "$(bundle test/reliability-core.js src/services/entitlements.js src/services/insights.js src/services/briefEngine.js test/brief-engine-wiring.test.js)"
 
 # ── Bundle 13: discovery planner — deterministic plan core + read-layer + §6 gate
 section "discovery planner"
-run_js "$(bundle test/reliability-core.js src/services/discovery.js test/discovery.test.js)"
+run_js "$(bundle test/reliability-core.js src/services/entitlements.js src/services/discovery.js test/discovery.test.js)"
 
 # ── Bundle 14: entity resolution — Phase-1 confidence bands (wrong-person merge fix)
 section "entity resolution"
@@ -161,7 +161,7 @@ run_js "$OUTT"
 # ── Bundle 18: interests read-path — discovery gather degrades when the interests
 # table is absent (its N5 foundation migration is unrun; docs/INTERESTS.proposed.sql).
 section "discovery interests degradation"
-run_js "$(bundle test/reliability-core.js src/services/discovery.js test/discovery-interests-degradation.test.js)"
+run_js "$(bundle test/reliability-core.js src/services/entitlements.js src/services/discovery.js test/discovery-interests-degradation.test.js)"
 
 # ── Bundle 19: user-set goals — pure vital-few selection + store/read layer ──
 # time.js is included because goals.js stamps week_of via localWeekOf/mondayOf.
@@ -246,5 +246,12 @@ run_js "$OUTCN"
 # 2026-08-06 / 08-08, so a silent scan failure here has a deadline.
 section "trial downgrade silent-failure reporting"
 run_js "$(bundle test/prelude-trial-downgrade.js src/jobs/trialDowngrade.js test/trial-downgrade.test.js)"
+
+# ── Bundle 27: planTier — one entitlement decision, and it knows the clock ──
+# Replaces six drifted local copies. Pure module, so reliability-core.js is
+# enough. Covers the stale-plan-column case that flag 23 was about, plus the
+# strict-`>` boundary that matches v_people_for_agent.
+section "entitlements: time-aware planTier"
+run_js "$(bundle test/reliability-core.js src/services/entitlements.js test/entitlements.test.js)"
 
 printf '\n✅ All test bundles passed.\n'

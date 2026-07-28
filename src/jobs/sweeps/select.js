@@ -1,3 +1,4 @@
+import { planTier, isProLike } from '../../services/entitlements.js';
 import { daysUntilBirthday } from '../../utils/time.js';
 
 const HEALTH_DRIFT = 60, HEALTH_URGENT = 40;
@@ -16,7 +17,7 @@ const PERSON_COOLDOWN_DAYS = 7;         // don't nudge about the same person too
 // birthdays are ordinary factual tasks and continue (the person isn't paused).
 export function selectNudge(user, cand, now = new Date(), { suppressPromo = false } = {}) {
   const tier = planTier(user);
-  const proLike = tier === 'pro' || tier === 'trial';
+  const proLike = isProLike(tier);
   const ctx = cand.context || [];
   const byId = new Map(ctx.map(p => [p.person_id, p]));
   const cooldown = new Map((cand.cooldowns || []).map(c => [c.id, c.last_nudged_at]));
@@ -74,8 +75,3 @@ export function selectNudge(user, cand, now = new Date(), { suppressPromo = fals
   return { ...candidates[0], planTier: tier };
 }
 
-function planTier(user) {
-  if (user.plan === 'pro' && user.billing_status === 'active') return 'pro';
-  if (user.plan === 'trialing') return 'trial';
-  return 'free';
-}

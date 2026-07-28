@@ -1,3 +1,4 @@
+import { planTier } from '../entitlements.js';
 // ─────────────────────────────────────────────────────────────────────────────
 // Weekly-note canonical composer (WS-F / N2).
 //
@@ -116,11 +117,6 @@ function byCanonicalOrder(a, b) {
 }
 
 // Same tier logic as the SMS selector (module-private there, tiny, restated).
-export function planTier(user) {
-  if (user.plan === 'pro' && user.billing_status === 'active') return 'pro';
-  if (user.plan === 'trialing') return 'trial';
-  return 'free';
-}
 
 // ── Renderable view of the record ────────────────────────────────────────────
 // The single content gate every channel shares. Tonight's law (N2): the crisis
