@@ -185,9 +185,16 @@ against the database or a real request, and update this section if reality has m
   inside the one gating battery.
 - **Bundle numbers in use: 17 (model-timestamps), 18 (interests), 19 (goals), 20 (§6 suppression
   read), 21 (quota reads), 22 (crisis vs pre-model short-circuits), 23 (relationships writes),
-  24 (memory silent failures), 25 (consent audit trail), 26 (trial downgrade).**
-  Next free: **27.** Station docs have claimed already-taken numbers more than once —
+  24 (memory silent failures), 25 (consent audit trail), 26 (trial downgrade),
+  27 (entitlements).** Next free: **28.** Station docs have claimed already-taken numbers more than once —
   check `test/run-tests.sh`, don't trust.
+- **THERE ARE THREE CONCAT RIGS, not one** (corrected 2026-07-27): `test/run-tests.sh`,
+  `test/run-n2-brief-email.sh`, and `test/run-admin-tests.sh`. `run-all.sh` drives all three.
+  **If you change a `src/` file's imports, every rig that concatenates it must be updated**, not
+  just `run-tests.sh` — the strip removes the import line, so a newly-imported helper must be
+  concatenated ahead of its consumer or the bundle dies with `X is not defined`. This bit the
+  entitlements collapse: the in-worktree `run-tests.sh` run was green and the merged-main battery
+  crashed. Grep all three: `grep -rln 'strip\b' test/*.sh`.
 - **The concat rig can host failure-branch tests — but not with `reliability-core.js`.** Its fake
   Supabase is a working in-memory DB: it always resolves `{ error: null }` and can never throw, so
   it cannot drive an error path. It also declares `const supabase`, so you cannot add your own
@@ -344,6 +351,27 @@ against the database or a real request, and update this section if reality has m
 - **All four prod people are `dunbar_tier='network'`** with `source='auto'`. Under the recommended
   tier→cadence mapping (network ⇒ no cadence) that means a cadence rollout would activate for
   **nobody** until Emil actually sorts people into rings — the safest possible arming path.
+
+**Entitlement (`planTier`)** — collapsed and made time-aware 2026-07-27
+- **One copy, `src/services/entitlements.js`**, exporting `planTier(user, now = new Date())` and
+  `isProLike(tier)`. It replaced **six** local copies (`jobs/sweeps/select.js`,
+  `jobs/brief/select.js`, `services/discovery.js`, `services/briefEngine.js` — where it was called
+  `tierOf` — `services/insights.js`, `services/brief/composer.js`). An earlier note said five; the
+  sixth was `brief/composer.js`.
+- They had **drifted**: three guarded `user &&` and returned `'free'` on a nullish user, three did
+  not and threw a `TypeError`. Same logical function, two different failure modes by file.
+- It is now **time-aware**, matching `v_people_for_agent` exactly, including the strict `>` so a
+  trial is over at the instant of `trial_ends_at`. A trial past its expiry is not a trial whatever
+  the `plan` column says — entitlement no longer depends on the downgrade cron having run.
+- **LOAD-BEARING: three loaders did not SELECT `trial_ends_at`** — `users.listActiveForBrief`,
+  `users.listNudgeable`, and both of `briefEmail`'s queries. Those feed every job-path tier call.
+  Shipping the time check alone would have made `undefined > now` false and moved **every live
+  trial to free on deploy**. The column was added to all four in the same commit.
+- **The helper fails OPEN on a missing/unparseable `trial_ends_at`** (returns `'trial'`).
+  `app_users.trial_ends_at` is NOT NULL, so absence can only mean a loader that forgot the column —
+  a code bug. Failing closed there would mass-downgrade silently; failing open degrades to the old
+  behaviour. **Any new loader feeding a tier decision must select `trial_ends_at`,** or the feature
+  quietly won't engage for those users.
 
 **The trial→free transition** (verified read-only 2026-07-27; both live trials lapse Aug 6 / Aug 8)
 - **The downgrade job WILL work.** Proven by running the real UPDATE inside a transaction and
@@ -634,7 +662,7 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 | 20 | **Should `addFact` fail closed when supersession fails?** | DECISION NEEDED. Today the retirement failure is logged (`facts.supersede.failed`) and the insert proceeds, so the person can end up with two current values for a single-valued slot. Alternative is to abort the insert, which loses the user's newest correction instead. I chose "keep the correction, log loudly" as the lesser harm — but it is a real product call. |
 | 21 | **`coreFive.js:recomputeCoreFive()` is a `throw new Error('TODO')` stub** | ANSWERED 2026-07-27: the throw is **unreachable** — `runMonthlyCoreFive()` never calls it (import commented out, body is a log line), so the cron has never failed. The stub is the *auto* fallback; the primary path is the user-chosen `set_priority_people` RPC, which works but is unreachable from the UI. |
 | 22 | **On the FREE plan the proactive layer is entirely dead** | Still true, but re-scoped 2026-07-27: it is currently moot because `BRIEF_DRY_RUN=true` means NOBODY gets proactive SMS. The live consequence on Aug 6/8 is **in-app**, not SMS — `today.ts` free-gates its drift feed on `isPriority` (= `is_core_five`), so the Today feed empties out. Fix is to wire the UI to `POST /api/priority/swap`, which already exists end to end. |
-| 23 | **`planTier()` is not time-aware, but the view is** | Duplicated in 5 files; all return `'trial'` for `plan='trialing'` regardless of `trial_ends_at`, while `v_people_for_agent` checks the clock. A silently-failed downgrade therefore grants trial entitlements forever in JS while SQL says otherwise. Cheapest fix: add the `trial_ends_at > now()` check to `planTier()` so entitlement stops depending on a cron having run. Consider collapsing the five copies into one helper at the same time. |
+| 23 | ~~`planTier()` is not time-aware, but the view is~~ **CLOSED 2026-07-27.** One helper in `services/entitlements.js`, time-aware, six copies collapsed, four loaders fixed. Bundle 27, mutation-checked, ship-dark verified. | Was duplicated in 6 files (not 5); all return `'trial'` for `plan='trialing'` regardless of `trial_ends_at`, while `v_people_for_agent` checks the clock. A silently-failed downgrade therefore grants trial entitlements forever in JS while SQL says otherwise. Cheapest fix: add the `trial_ends_at > now()` check to `planTier()` so entitlement stops depending on a cron having run. Consider collapsing the five copies into one helper at the same time. |
 
 ---
 
@@ -642,6 +670,15 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 
 Append here when the doctrine changes. Date, what changed, why.
 
+- **2026-07-27 (entitlements)** — Closed flag 23. Collapsed **six** drifted `planTier`/`tierOf`
+  copies into one time-aware `services/entitlements.js`; net −17 lines. Found the copies had two
+  different nullish-user behaviours (three threw, three returned free). **The critical finding was
+  that three loaders never selected `trial_ends_at`**, so the obvious version of this fix would
+  have downgraded every live trial on deploy — the column was added to all four loaders and the
+  helper fails open on a missing value. Ship-dark verified (both trials end Aug 6/8; every verdict
+  unchanged today). Bundle 27, mutation-checked (clock-blind helper fails 5 assertions). Also
+  corrected a real doctrine gap: **there are three concat rigs, not one**, and missing the second
+  one crashed the merged-main battery after an all-green worktree run — Law 3 doing its job.
 - **2026-07-27 (trial-downgrade sweep)** — Hardened `trialDowngrade.js`, the flag-14 site with a
   date on it: both the expired-trial scan and the per-user update now report
   (`trial.downgrade.scan_failed` / `trial.downgrade.failed`), and the summary line counts rows
