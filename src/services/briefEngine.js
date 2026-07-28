@@ -1,3 +1,4 @@
+import { planTier, isProLike } from './entitlements.js';
 import { computeInsights, gatherInsightSignals } from './insights.js';
 import { isInSuppressionWindow } from './safetyFlags.js';
 import { listInterests } from './interests.js';
@@ -60,11 +61,6 @@ const CLOSING_QUESTION = 'Who do you want to make time for this week?';
 // tierOf — the viewer's own plan. Local (not imported from insights.js) so the
 // pure stages stay self-contained and unit-testable in isolation.
 // ─────────────────────────────────────────────────────────────────────────────
-export function tierOf(user) {
-  if (user && user.plan === 'pro' && user.billing_status === 'active') return 'pro';
-  if (user && user.plan === 'trialing') return 'trial';
-  return 'free';
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // selectBriefReasons — PURE. insight feed (+ light context) → ranked, gated PLAN.
@@ -82,8 +78,8 @@ export function tierOf(user) {
 // contract exactly (see test/brief-suppression.test.js) on the insight-driven path.
 // ─────────────────────────────────────────────────────────────────────────────
 export function selectBriefReasons(user, { insights = [], selfNote = null, goalFollowup = null } = {}, { suppressPromo = false } = {}) {
-  const tier = tierOf(user);
-  const proLike = tier === 'pro' || tier === 'trial';
+  const tier = planTier(user);
+  const proLike = isProLike(tier);
   const offerActions = proLike && !suppressPromo;
 
   // Actionable reasons: free sees only ungated (Core 5) reasons; pro/trial see all.
@@ -284,7 +280,7 @@ export function buildFirstBrief(user, profile = {}, { insights = [], now = new D
     variant: 'first',
     generatedAt: isoOf(now),
     userName,
-    viewerTier: tierOf(user),
+    viewerTier: planTier(user),
     quiet: !hasAnything,
     empty: !hasAnything,
     sections,

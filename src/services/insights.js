@@ -1,3 +1,4 @@
+import { planTier } from './entitlements.js';
 import { supabase } from '../lib/supabase.js';
 import { daysUntilBirthday } from '../utils/time.js';
 import * as people from './people.js';
@@ -85,11 +86,6 @@ function ageInDays(iso, now) {
   return Math.max(0, Math.floor((ms(now) - t) / DAY));
 }
 
-export function planTier(user) {
-  if (user && user.plan === 'pro' && user.billing_status === 'active') return 'pro';
-  if (user && user.plan === 'trialing') return 'trial';
-  return 'free';
-}
 
 // Entitlement tag ONLY (no enforcement): Core 5 is free, everyone else is Pro.
 function entitlementFor(isCoreFive) {

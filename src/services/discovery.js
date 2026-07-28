@@ -1,3 +1,4 @@
+import { planTier } from './entitlements.js';
 import { supabase } from '../lib/supabase.js';
 import { daysUntilBirthday } from '../utils/time.js';
 import * as interestsSvc from './interests.js';
@@ -116,11 +117,6 @@ function freshnessBoost(iso, now) {
   return 0;
 }
 
-export function planTier(user) {
-  if (user && user.plan === 'pro' && user.billing_status === 'active') return 'pro';
-  if (user && user.plan === 'trialing') return 'trial';
-  return 'free';
-}
 
 // Entitlement tag ONLY (no enforcement). The internet-lookup enrichment is the
 // Pro feature, so everything is 'pro'/gated EXCEPT a Core-5 person's occasion,

@@ -156,7 +156,7 @@ export async function runBriefEmails(now = new Date()) {
 // Same per-user local-time semantics as the SMS job.
 async function getUsersDueForEmail(now) {
   const { data } = await supabase.from('app_users')
-    .select('id, name, timezone, brief_day, brief_time, plan, billing_status, brief_email, brief_email_status, brief_email_verified_at')
+    .select('id, name, timezone, brief_day, brief_time, plan, billing_status, trial_ends_at, brief_email, brief_email_status, brief_email_verified_at')
     .eq('brief_email_status', 'subscribed');
   const due = [];
   for (const u of data || []) {
@@ -179,7 +179,7 @@ export async function sendBriefEmailTo(user, now = new Date()) {
   // only state that receives delivery; the verified_at check mirrors the DB
   // backstop (D16) so a manually poked row cannot slip through either.
   const { data: sub } = await supabase.from('app_users')
-    .select('id, name, timezone, brief_day, brief_time, plan, billing_status, brief_email, brief_email_status, brief_email_verified_at')
+    .select('id, name, timezone, brief_day, brief_time, plan, billing_status, trial_ends_at, brief_email, brief_email_status, brief_email_verified_at')
     .eq('id', user.id).maybeSingle();
   if (!sub || sub.brief_email_status !== 'subscribed' || !sub.brief_email || !sub.brief_email_verified_at) {
     logger.event('brief_email.skipped', {

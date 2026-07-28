@@ -47,7 +47,7 @@ export async function incrementShowingUp(userId) {
 // ── Brief support ────────────────────────────────────────────────────
 export async function listActiveForBrief() {
   const { data } = await supabase.from('app_users')
-    .select('id, phone, name, timezone, brief_day, brief_time, plan, billing_status, opted_out')
+    .select('id, phone, name, timezone, brief_day, brief_time, plan, billing_status, opted_out, trial_ends_at')
     .eq('opted_out', false);
   return data || [];
 }
@@ -63,7 +63,7 @@ export async function recordBriefSent(userId) {
 // ── Nudge support (daily sweeps) ─────────────────────────────────────
 export async function listNudgeable() {
   const { data } = await supabase.from('app_users')
-    .select('id, phone, name, timezone, plan, billing_status, quiet_hours_start, quiet_hours_end')
+    .select('id, phone, name, timezone, plan, billing_status, quiet_hours_start, quiet_hours_end, trial_ends_at')
     .eq('opted_out', false);
   return data || [];
 }
