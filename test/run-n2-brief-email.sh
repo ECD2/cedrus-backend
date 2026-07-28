@@ -38,6 +38,9 @@ strip() {
 OUT="$(mktemp -t n2-brief-email).js"
 {
   cat test/brief-email-stubs.js
+  # composer.js imports planTier from services/entitlements.js; the strip removes
+  # the import, so the helper must be concatenated ahead of it.
+  strip src/services/entitlements.js
   strip src/services/voiceGuard.js
   strip src/services/brief/template.js
   strip src/services/brief/composer.js
