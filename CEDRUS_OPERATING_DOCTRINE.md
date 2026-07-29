@@ -196,8 +196,11 @@ against the database or a real request, and update this section if reality has m
 - **Bundle numbers in use: 17 (model-timestamps), 18 (interests), 19 (goals), 20 (§6 suppression
   read), 21 (quota reads), 22 (crisis vs pre-model short-circuits), 23 (relationships writes),
   24 (memory silent failures), 25 (consent audit trail), 26 (trial downgrade),
-  27 (entitlements).** Next free: **28.** Station docs have claimed already-taken numbers more than once —
-  check `test/run-tests.sh`, don't trust.
+  27 (entitlements), 28 (budget guard), 29 (budget vs pipeline ordering), 30 (card rail state
+  machine), 31 (card failure honesty), 32 (card replies vs pipeline ordering), 33 (admin
+  broadcasts), 34 (web onboarding answers) — 28–34 claimed by branch
+  `feat/night-2026-07-28-v1-rail`, unmerged as of 2026-07-29 ~02:30.** Next free: **35.** Station
+  docs have claimed already-taken numbers more than once — check `test/run-tests.sh`, don't trust.
 - **THERE ARE THREE CONCAT RIGS, not one** (corrected 2026-07-27): `test/run-tests.sh`,
   `test/run-n2-brief-email.sh`, and `test/run-admin-tests.sh`. `run-all.sh` drives all three.
   **If you change a `src/` file's imports, every rig that concatenates it must be updated**, not
@@ -205,6 +208,12 @@ against the database or a real request, and update this section if reality has m
   concatenated ahead of its consumer or the bundle dies with `X is not defined`. This bit the
   entitlements collapse: the in-worktree `run-tests.sh` run was green and the merged-main battery
   crashed. Grep all three: `grep -rln 'strip\b' test/*.sh`.
+  Two more strip facts, both hit 2026-07-29: (a) the strip removes only lines that START with
+  `import ` — a **multi-line `import {...}`** leaves its continuation lines behind as orphaned
+  syntax ("Unexpected }"), so every import in a rig-concatenated file must be single-line; and
+  (b) an **aliased named import** (`import { create as createPerson }`) dies under concat because
+  the alias identifier is never defined — use `import * as ns` and let the rig's
+  `echo 'const ns = { … };'` line build the namespace (Bundle 1's pattern).
 - **The concat rig can host failure-branch tests — but not with `reliability-core.js`.** Its fake
   Supabase is a working in-memory DB: it always resolves `{ error: null }` and can never throw, so
   it cannot drive an error path. It also declares `const supabase`, so you cannot add your own
@@ -409,11 +418,20 @@ against the database or a real request, and update this section if reality has m
 - **`checkRateLimit()` is the ONLY per-user spend ceiling in the application.** It fronts the one
   OpenAI call on both the inbound SMS path (`pipeline/index.js:97`, STAGE B3) and web capture
   (`capture.js:154`). Free cap is 20 inbound/day (`v_message_quota`).
-- **Nothing reads `v_daily_token_usage` or `v_daily_sms_usage`** — the cost views exist and have
-  zero consumers in `src/`. There is **no alerting, no budget guard, and no automatic kill switch**
-  anywhere in the backend (`config.enableJobs` is a manual global switch for jobs only). The real
-  backstops are OpenAI's and Twilio's own account-level limits, which live outside this repo —
-  verify them in those dashboards, don't assume the code has you covered.
+- ~~Nothing reads `v_daily_token_usage` or `v_daily_sms_usage`~~ — **a budget guard exists ON
+  BRANCH `feat/night-2026-07-28-v1-rail` (unmerged) as of 2026-07-29.** `services/budget.js` +
+  `jobs/budgetGuard.js` (hourly, :10) sum both views for the UTC day, compare against
+  `DAILY_TOKEN_BUDGET` / `DAILY_SMS_BUDGET` (env, unset = that dimension DISARMED and announced
+  every run), and upsert a `system_flags` kill-switch row (table is proposed DDL — NOT in prod
+  yet). Readers: pipeline STAGE B3.5 (after the per-user cap, before the model call,
+  crisis-exempt) and the scheduler's outbound-job gate. Every read fails OPEN via
+  `quota.read.failed`. Facts that stay true about the views: per-user/per-day rows, `day` =
+  `date_trunc('day', …)` **UTC**, bigints arrive as **strings** through supabase-js, and
+  `sms_segments` sums BOTH directions — including `provider_status='dry_run'` rows, so dry-run
+  rehearsal inflates the SMS count (set the budget with headroom until arming). Until the branch
+  merges and the migration runs, prod still has **no** guard, and the account-level OpenAI/Twilio
+  caps remain unverified (flag 18) — verify them in those dashboards, don't assume the code has
+  you covered.
 - **The Priority 0 crisis gate lives INSIDE `understand()` (STAGE C).** The comment in
   `05_understand.js` about crisis "short-circuiting earlier" means earlier *within* `understand()`,
   not earlier than anything in the pipeline. Every early return above STAGE C therefore bypasses
@@ -666,7 +684,7 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 | 14 | ~~45~~ **~41 of 101 `supabase.from()` sites don't bind `error`** | IN PROGRESS. Eight hardened (bundles 21/23/24/25, all mutation-checked): quota reads, `logContact`, `linkMessagePerson`, fact supersession, both goal reads, `consent.log`. Remainder is mostly `people.js` and `users.js`. Next candidate `briefEngine.js:355` is blocked on `reliability-core.js` having no logger — see Part 4. |
 | 15 | ~~`isInSuppressionWindow()` collapses 4 states into a silent `return false`~~ **CLOSED 2026-07-26** under an explicit narrow Law-2 exception from Emil. | Logging only; control flow unchanged; still fails OPEN. Covered by Bundle 20 and mutation-checked. **The same shape is still live in flags 11 and 14** — this fixed one instance, not the class. |
 | 16 | ~~A rate-limited user in crisis gets the cap message~~ **CLOSED 2026-07-26.** STAGE B2.5 exempts a crisis message from both the cap AND the first-message onboarding return. | Scope turned out to be WIDER than filed: `needsFreshStart` was the worse path — a first-ever crisis message got the Twilio opt-in script. Both fixed, Bundle 22, mutation-checked. Residual risk accepted by Emil: a crisis message bypasses the cap, so fixed-template replies are uncapped (Twilio cost only, no model spend; inbound SMS costs the sender). |
-| 17 | No cost monitoring anywhere | `v_daily_token_usage` and `v_daily_sms_usage` exist with **zero consumers**. Nothing alerts on spend. `quota.read.failed` is now emitted but nothing consumes it either — an alert has to be wired somewhere for it to matter. |
+| 17 | ~~No cost monitoring anywhere~~ **CONSUMER BUILT 2026-07-29, pending merge.** Budget guard on branch `feat/night-2026-07-28-v1-rail`: hourly job + kill-switch row + inbound/outbound gates, mutation-checked (Bundles 28/29). | Closes at the root only when: branch merged, `system_flags` migration run, `DAILY_TOKEN_BUDGET`/`DAILY_SMS_BUDGET` set on Railway, and a `budget.check` line observed in prod logs. `quota.read.failed` still has no alert consumer, and log-based alerting is still absent — the guard enforces, it does not page anyone. |
 | 18 | No spend ceiling outside the app is verified | OpenAI and Twilio account-level caps are the only real backstops and they live outside this repo. Confirm they exist and are set before beta. |
 | 19 | **Nothing ever sets `people.contact_frequency_days`** | Root cause behind the still-dead `relationship_health_score`, the hidden health bar, the "drifting" pill, and the dormant backend drift nudge + drift brief moment (all four gate on health being non-null). Unlike days-since this guard is CORRECT — the field is the score's denominator. So the fix is a product decision, not a view edit: who sets a per-person contact cadence, and what is the default? Probably derives from `dunbar_tier`. |
 | 20 | **Should `addFact` fail closed when supersession fails?** | DECISION NEEDED. Today the retirement failure is logged (`facts.supersede.failed`) and the insert proceeds, so the person can end up with two current values for a single-valued slot. Alternative is to abort the insert, which loses the user's newest correction instead. I chose "keep the correction, log loudly" as the lesser harm — but it is a real product call. |
@@ -680,6 +698,19 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 
 Append here when the doctrine changes. Date, what changed, why.
 
+- **2026-07-29 (overnight V1 rail build)** — One branch, five commits, unmerged, STOP before push
+  honored: budget guard (flag 17's consumer — kill switch + hourly job + pipeline STAGE B3.5 +
+  scheduler outbound gate), the opportunity-card rail (admin queue → dry-run sender with the
+  3/user/rolling-7d cap → YES/SKIP/LATER/NOT THEM/NEVER as STAGE B2.6 → 3-day follow-up →
+  `met_confirmed`, the only tree-advancing event), admin broadcasts (draft → explicit
+  approve-to-send; quiet hours 21–09 ET, 1/ET-day, 500-recipient refusal; web feed at
+  `GET /api/broadcasts/active`), `app_users.member_status` + `GET /api/me`, and
+  `POST /api/onboarding/answers` into the facts/people layer. Four proposed migrations, none
+  applied (Law 5). Bundles 28–34; worktree battery 1848 PASS exit 0; SEVEN guard mutations each
+  proven red then restored. Part 4 updated: budget-guard branch status, two new strip facts
+  (multi-line imports and aliased imports die under concat), bundle numbers through 34. Flag 17
+  re-scoped to "pending merge + migration + env + observed budget.check". Full report in
+  `SESSION_NOTES_2026-07-28.md`.
 - **2026-07-28 (THE PIVOT)** — Cedrus became **the daytime social layer for people who work from
   home**, launch city Miami, web-primary with SMS secondary. Created **`CEDRUS_V1_SPEC.md`** in the
   repo root as the product canon; every session now reads the doctrine and then the spec, in that
