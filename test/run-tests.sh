@@ -254,4 +254,81 @@ run_js "$(bundle test/prelude-trial-downgrade.js src/jobs/trialDowngrade.js test
 section "entitlements: time-aware planTier"
 run_js "$(bundle test/reliability-core.js src/services/entitlements.js test/entitlements.test.js)"
 
+# ── Bundle 28: budget guard — the cost views get their first consumer ───────
+# Real budget.js + budgetGuard.js over a programmable seam (failure branches are
+# the point: unreadable views, refused upserts, thrown clients — all fail OPEN
+# and all announce). Also pins the >= trip at the budget line and prod's
+# string-bigint shape.
+section "budget guard: usage, verdicts, kill switch"
+run_js "$(bundle test/prelude-budget.js src/services/budget.js src/jobs/budgetGuard.js test/budget-guard.test.js)"
+
+# ── Bundle 29: budget kill switch obeys the pipeline's safety ordering ──────
+# Same concat as Bundle 22 (real safetyDetection.js + selfName.js +
+# pipeline/index.js) plus the __budgetGate knob. Proves: crisis gets 988 even
+# over budget, STOP and the opt-in script outrank the pause, paused replies stay
+# bounded by the per-user cap, and the gate fails open when unreadable.
+section "budget kill switch vs pipeline ordering"
+OUTBG="$(mktemp -t cedrus-tests).js"
+{
+  cat test/prelude-crisis-cap.js
+  strip src/services/safetyDetection.js
+  strip src/pipeline/selfName.js
+  strip src/pipeline/index.js
+  cat test/budget-pipeline.test.js
+} > "$OUTBG"
+run_js "$OUTBG"
+
+# ── Bundle 30: card rail — the full state machine over the real fake DB ─────
+# queued→sending→sent→replies→follow-up→met_confirmed; the 3/rolling-7d hard
+# cap; dry-run suppression (zero Twilio calls); send-time suppression re-check;
+# opted-out cancel; §6 hold; daytime window. time.js is real (localParts).
+section "card rail state machine"
+run_js "$(bundle test/reliability-core.js test/prelude-cards.js src/utils/time.js src/services/cards.js src/jobs/cardSender.js src/jobs/cardFollowup.js test/cards-state.test.js)"
+
+# ── Bundle 31: card rail failure honesty (supabase never throws) ────────────
+# Programmable seam: read failures fall through (never block a real message);
+# a failed NOT THEM/NEVER write gets honest copy, never a confident ack.
+section "card rail failure honesty"
+run_js "$(bundle test/prelude-cards-fail.js src/services/cards.js test/cards-failure.test.js)"
+
+# ── Bundle 32: card replies obey the pipeline's safety ordering ─────────────
+# Same concat as Bundles 22/29. compliance > crisis > cards > cap > budget:
+# crisis never touches card state; card acks survive over-cap and over-budget.
+section "card replies vs pipeline ordering"
+OUTCP="$(mktemp -t cedrus-tests).js"
+{
+  cat test/prelude-crisis-cap.js
+  strip src/services/safetyDetection.js
+  strip src/pipeline/selfName.js
+  strip src/pipeline/index.js
+  cat test/cards-pipeline.test.js
+} > "$OUTCP"
+run_js "$OUTCP"
+
+# ── Bundle 33: admin broadcasts — draft → explicit approve → send/publish ───
+# Real broadcasts.js + real time.js over the fake DB. Quiet hours 21–09 ET
+# (boundary pinned), the 1/ET-day cap, the 500-recipient refusal, opted-out
+# exclusion, dry-run = zero Twilio calls, kill-switch refusal, web feed.
+section "admin broadcasts"
+run_js "$(bundle test/reliability-core.js test/prelude-broadcasts.js src/utils/time.js src/services/broadcasts.js test/broadcasts.test.js)"
+
+# ── Bundle 34: web onboarding answers land in the facts/people layer ────────
+# Real onboardingAnswers.js + REAL memory.js (supersession) + REAL people.js
+# (create/fuzzyFind, ownership guard) over the fake DB. time.js is included
+# because memory.js stamps week_of via localWeekOf/mondayOf.
+section "web onboarding answers"
+OUTOA="$(mktemp -t cedrus-tests).js"
+{
+  cat test/reliability-core.js
+  echo 'const logger = { warn(){}, info(){}, error(){}, event(){}, addContext(){}, runWithContext:(_,f)=>f() };'
+  strip src/utils/time.js
+  strip src/services/memory.js
+  echo 'const memory = { addFact };'
+  strip src/services/people.js
+  echo 'const people = { create, fuzzyFind };'
+  strip src/services/onboardingAnswers.js
+  cat test/onboarding-answers.test.js
+} > "$OUTOA"
+run_js "$OUTOA"
+
 printf '\n✅ All test bundles passed.\n'

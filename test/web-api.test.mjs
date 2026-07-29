@@ -47,7 +47,9 @@ const person = (id, user_id, name, extra = {}) => ({
 
 const db = {
   app_users: [
-    { id: uA, auth_user_id: 'auth-a', name: 'Alba', phone: '15551110001', timezone: 'America/New_York', plan: 'trialing', onboarding_complete: true },
+    // uA carries member_status (post-migration shape); uB deliberately does
+    // NOT (pre-migration shape) — /me must coalesce to 'founding' for both.
+    { id: uA, auth_user_id: 'auth-a', name: 'Alba', phone: '15551110001', timezone: 'America/New_York', plan: 'trialing', onboarding_complete: true, member_status: 'founding', created_at: '2026-07-01T00:00:00.000Z' },
     { id: uB, auth_user_id: 'auth-b', name: 'Bram', phone: '15551110002', timezone: 'America/New_York', plan: 'trialing', onboarding_complete: true },
   ],
   v_message_quota: [
@@ -131,6 +133,7 @@ p('\n── 1. Auth: JWT required on every route ──');
     ['POST', '/priority/swap', { person_ids: [] }],
     ['POST', `/people/${A.ana}/restore`, undefined],
     ['GET', '/people/archived', undefined],
+    ['GET', '/me', undefined],
   ];
   for (const [method, path, body] of routes) {
     const bare = await call(path, { method, body });
@@ -410,6 +413,23 @@ p('\n── 8. Voice: user-facing copy obeys the spec ──');
   check('no exclamation marks in API copy', COPY.every((s) => !s.includes('!')), COPY.filter((s) => s.includes('!')));
   check('sixth-person copy keeps the product promise ("stays remembered", "swap anytime")',
     /stays remembered/.test(swapSvc.MSG_PRIORITY_LIMIT) && /swap anytime/i.test(swapSvc.MSG_PRIORITY_LIMIT), null);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+p('\n── 9. /me: the user payload carries member_status (V1 item 4) ──');
+{
+  const me = await call('/me', { token: 'tok-a' });
+  check('/me → 200', me.status === 200, me);
+  check('identity comes from the token, curated keys only',
+    me.json?.id === uA && me.json?.name === 'Alba'
+    && Object.keys(me.json).sort().join(',') === 'created_at,id,member_status,name,onboarding_complete,phone,timezone', me.json);
+  check('member_status is founding (column present)', me.json?.member_status === 'founding', me.json);
+
+  const meB = await call('/me', { token: 'tok-b' });
+  check('pre-migration row (no column) still reads founding — everyone is, in V1',
+    meB.status === 200 && meB.json?.member_status === 'founding' && meB.json?.id === uB, meB.json);
+  check('no raw-row leakage (no plan/billing/auth fields)',
+    meB.json.plan === undefined && meB.json.auth_user_id === undefined, meB.json);
 }
 
 // ════════════════════════════════════════════════════════════════════════════

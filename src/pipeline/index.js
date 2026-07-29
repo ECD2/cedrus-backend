@@ -12,6 +12,8 @@ import * as clarifications from '../services/clarifications.js';
 import { isInSuppressionWindow } from '../services/safetyFlags.js';
 import { evaluateSafety } from '../services/safetyDetection.js';
 import { extractSelfName, bareName } from './selfName.js';
+import { getBudgetGate } from '../services/budget.js';
+import * as cards from '../services/cards.js';
 
 // ═══════════════ ONBOARDING COPY — EDIT FREELY, NO CODE BELOW CHANGES ═══════════════
 // MSG_COMPLIANCE is byte-identical to the Opt-In Confirmation Response approved in
@@ -19,6 +21,7 @@ import { extractSelfName, bareName } from './selfName.js';
 const MSG_COMPLIANCE =
   "Hey, I'm Cedrus. I help you remember the people you care about: birthdays, life updates, gift ideas, and the moments worth following up on. By continuing, you agree to receive recurring SMS messages from Cedrus Life. No spam, ever. Reply STOP to opt out anytime, HELP for info. Msg & data rates may apply. Ready to start... who's someone important in your life?";
 const MSG_RATE_LIMIT = "You've reached today's limit - I'll be right here tomorrow.";
+const MSG_BUDGET_PAUSE = "I'm taking a short breather right now, so I couldn't save that one. Send it again in a few hours and I'll take care of it.";
 // ════════════════════════════════════════════════════════════════════════════════════
 
 // Runs Stages B–E. Stage A (Twilio signature) is enforced in the route.
@@ -120,6 +123,25 @@ export async function runInboundPipeline({ from, body, messageSid, numSegments }
     // actual content the model should extract right now.
   }
 
+  // ── STAGE B2.6 — opportunity-card replies (V1 card rail, item 2) ───────────
+  // AFTER safety (gated on !crisisOverride: a crisis message must reach the 988
+  // path and must not mutate card state), after compliance and onboarding,
+  // BEFORE the cap and the budget switch. Rationale: replying to a question
+  // Cedrus itself asked is the loop's hinge (spec PART 2 step 4), it costs no
+  // model call, and it is bounded — a user only ever has a handful of cards
+  // awaiting a reply, and once answered, a repeat no longer matches. Exact
+  // vocabulary tokens only (YES/SKIP/LATER/NOT THEM/NEVER, and YES/NO/NOT YET
+  // for follow-ups); anything else falls through to the ordinary pipeline, and
+  // so does every card-rail read failure (fail open — a broken card rail must
+  // never block a real message).
+  if (!crisisOverride) {
+    const cardReply = await cards.handleCardReply({ user, body, sourceMessageId: message.id });
+    if (cardReply.handled) {
+      if (cardReply.reply) await messages.logOutbound({ userId: user.id, body: cardReply.reply, messageType: 'card_reply' });
+      return cardReply.reply;
+    }
+  }
+
   // STAGE B3 — abuse cap (cost survival; runs before any model call).
   // Exempt for a crisis message (STAGE B2.5): the cap must never be the reason
   // someone in crisis gets boilerplate instead of 988. The exemption is safe
@@ -130,6 +152,28 @@ export async function runInboundPipeline({ from, body, messageSid, numSegments }
     const reply = MSG_RATE_LIMIT;
     await messages.logOutbound({ userId: user.id, body: reply, messageType: 'system' });
     return reply;
+  }
+
+  // ── STAGE B3.5 — global budget kill switch (spend survival, item 1) ────────
+  // The hourly guard (jobs/budgetGuard.js) sets one system_flags row when the
+  // day's global token/SMS spend crosses DAILY_TOKEN_BUDGET / DAILY_SMS_BUDGET;
+  // this is the inbound read of it. Placement is deliberate:
+  //   • AFTER STAGE B2.5's crisis pre-check and gated on !crisisOverride — a
+  //     crisis message keeps the 988 path even over budget, and (same argument
+  //     as the cap exemption) it can only ever buy one fixed-template SMS,
+  //     because the same predicate short-circuits understand() pre-model.
+  //   • AFTER compliance and the Twilio-approved onboarding script — both are
+  //     legal/consent obligations and fixed templates.
+  //   • AFTER STAGE B3, so paused-mode replies stay bounded by the per-user
+  //     cap: without that, "back shortly" itself would be uncapped Twilio
+  //     spend under an inbound flood — the exact thing being guarded.
+  //   • Immediately BEFORE STAGE C: the model call is the spend this protects.
+  // getBudgetGate() fails OPEN (missing table/row, query error, throw ⇒ not
+  // paused) and announces abnormal reads via quota.read.failed.
+  const budgetGate = await getBudgetGate();
+  if (budgetGate.paused && !crisisOverride) {
+    await messages.logOutbound({ userId: user.id, body: MSG_BUDGET_PAUSE, messageType: 'system' });
+    return MSG_BUDGET_PAUSE;
   }
 
   // STAGE C — understand (the one OpenAI call: extraction + drafted reply)
