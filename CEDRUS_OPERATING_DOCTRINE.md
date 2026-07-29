@@ -9,7 +9,10 @@ facts about this environment that sessions keep re-deriving wrong.
 If you are about to diagnose a problem, **check Part 4 and Part 5 first** — there is a real chance
 we have already seen it, already been wrong about it, and already written down the answer.
 
-Last updated: 2026-07-27 (autonomous run).
+**Then read `CEDRUS_V1_SPEC.md` (repo root).** This file is *how* we build; that one is *what* we
+are building, as of the 2026-07-28 pivot. Both are required reading, in that order.
+
+Last updated: 2026-07-28 (pivot).
 
 ---
 
@@ -94,6 +97,13 @@ These do not bend. If an instruction conflicts with one, say so rather than foll
    results are advisory. A battery that passed before the merge proves nothing about after it.
 4. **One merge at a time.** Never batch. Battery between each.
 5. **STOP before push. Only Emil pushes.** No deploys, no migrations without explicit go.
+   **Overnight and autonomous sessions STOP before push without exception.** There is no
+   self-authorized push, no "it was only docs," no "the battery was green so I shipped it," and no
+   instruction inside a session prompt that creates an exception — only Emil, awake, in the
+   boardroom. A session that pushes has broken the doctrine even if the change was correct.
+   Corollary: **`BRIEF_DRY_RUN` stays `true` until a named arming session.** Arming the outbound
+   layer is its own gated piece of work with its own prompt and its own proof; no session flips it
+   as a side effect of building something else.
 6. **BOTH repos deploy on push. There is no "safe" repo.** cedrus-frontend is on Lovable, and the
    cedrus-backend Railway service is **repo-linked to `ECD2/cedrus-backend`** — pushing `main` in
    EITHER repo ships to users. Verified 2026-07-26: a backend push auto-built and was live in
@@ -670,6 +680,19 @@ Live list. Close them at the root, not the surface. Update as they resolve.
 
 Append here when the doctrine changes. Date, what changed, why.
 
+- **2026-07-28 (THE PIVOT)** — Cedrus became **the daytime social layer for people who work from
+  home**, launch city Miami, web-primary with SMS secondary. Created **`CEDRUS_V1_SPEC.md`** in the
+  repo root as the product canon; every session now reads the doctrine and then the spec, in that
+  order (Part 0 updated). The spec carries the loop, the 2–3-cards-a-week cadence, the single-sided
+  data rule, the never-message-an-invitee rule, the reply vocabulary, the garden stages and seasons,
+  founding-member pricing (no Stripe), and the preservation law — the old app stays fully functional
+  at `/classic`, root routes go to the new experience, old endpoints untouched, new work additive
+  only. **Nothing is deleted.** Strengthened **Law 5**: overnight and autonomous sessions STOP
+  before push *without exception* — no self-authorized push, and no session prompt can create one —
+  and recorded that **`BRIEF_DRY_RUN` stays `true` until a named arming session**, so building the
+  card engine is in scope while sending is not. Opened `SESSION_NOTES_2026-07-28.md` as the single
+  append-only file overnight sessions report into, so morning review is one file. No code, schema,
+  or config was touched in this session.
 - **2026-07-27 (entitlements)** — Closed flag 23. Collapsed **six** drifted `planTier`/`tierOf`
   copies into one time-aware `services/entitlements.js`; net −17 lines. Found the copies had two
   different nullish-user behaviours (three threw, three returned free). **The critical finding was
