@@ -312,4 +312,23 @@ run_js "$OUTCP"
 section "admin broadcasts"
 run_js "$(bundle test/reliability-core.js test/prelude-broadcasts.js src/utils/time.js src/services/broadcasts.js test/broadcasts.test.js)"
 
+# ── Bundle 34: web onboarding answers land in the facts/people layer ────────
+# Real onboardingAnswers.js + REAL memory.js (supersession) + REAL people.js
+# (create/fuzzyFind, ownership guard) over the fake DB. time.js is included
+# because memory.js stamps week_of via localWeekOf/mondayOf.
+section "web onboarding answers"
+OUTOA="$(mktemp -t cedrus-tests).js"
+{
+  cat test/reliability-core.js
+  echo 'const logger = { warn(){}, info(){}, error(){}, event(){}, addContext(){}, runWithContext:(_,f)=>f() };'
+  strip src/utils/time.js
+  strip src/services/memory.js
+  echo 'const memory = { addFact };'
+  strip src/services/people.js
+  echo 'const people = { create, fuzzyFind };'
+  strip src/services/onboardingAnswers.js
+  cat test/onboarding-answers.test.js
+} > "$OUTOA"
+run_js "$OUTOA"
+
 printf '\n✅ All test bundles passed.\n'

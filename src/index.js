@@ -9,6 +9,7 @@ import adminPanelRouter from './routes/adminPanel.js';
 import adminCardsRouter from './routes/adminCards.js';
 import adminBroadcastsRouter from './routes/adminBroadcasts.js';
 import broadcastsRouter from './routes/api/broadcasts.js';
+import onboardingAnswersRouter from './routes/api/onboarding.js';
 import { adminAuthRouter, adminSessionAdapter } from './routes/adminAuth.js';
 import apiRouter from './routes/api/index.js';
 import onboardRouter from './routes/api/onboard.js';
@@ -55,6 +56,7 @@ app.use('/api/insights', insightsRouter); // INFRA-10: read-only insight engine 
 app.use('/api/reminders', remindersRouter); // UI-09: read-only upcoming reminders + delivery state (JWT, self-carries json+requireUser)
 app.use('/api/goals', goalsRouter); // INFRA-15: user-set goals CRUD + vital few (JWT, self-carries json+requireUser)
 app.use('/api/broadcasts', broadcastsRouter); // V1 web feed (item 3): GET /active (JWT, self-carries json+requireUser)
+app.use('/api/onboarding', onboardingAnswersRouter); // V1 web onboarding answers (item 5): POST /answers (JWT; distinct from PUBLIC /api/onboard)
 app.use('/api', apiRouter);      // N3: web capture, priority swap, restore (MOUNT_N3)
 
 // eslint-disable-next-line no-unused-vars
