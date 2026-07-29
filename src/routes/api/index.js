@@ -72,6 +72,24 @@ export function createApiRouter(deps = {}) {
     );
   };
 
+  // 0. Who am I — the signed-in user's own profile (V1 item 4). Session F
+  // reads member_status from here. req.appUser is select('*') (auth.js), so
+  // the column flows through once the MEMBER_STATUS migration lands; until
+  // then the coalesce keeps the payload truthful — in V1 everyone IS a
+  // Founding Member (spec PART 4). Curated keys only, never the raw row.
+  router.get('/me', handle('me', async (req) => {
+    const u = req.appUser;
+    return {
+      id: u.id,
+      name: u.name ?? null,
+      phone: u.phone ?? null,
+      timezone: u.timezone ?? null,
+      member_status: u.member_status || 'founding',
+      onboarding_complete: !!u.onboarding_complete,
+      created_at: u.created_at ?? null,
+    };
+  }));
+
   // 1. "Tell Cedrus" — propose, then confirm (docs/WEB_API_CONTRACT.md §3–4).
   router.post('/capture', handle('capture.propose', (req) =>
     capture.proposeCapture({ user: req.appUser, text: req.body && req.body.text }, deps.capture)));
