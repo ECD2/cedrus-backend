@@ -156,6 +156,13 @@ against the database or a real request, and update this section if reality has m
 - `app.use('/api', apiRouter)` is a catch-all that **runs auth before route matching**. Every
   path under `/api` returns 401 unauthenticated, mounted or not. **A 401 proves nothing about
   whether a route is mounted.** Use a 200 vs an unmounted-control 404 instead.
+- **`/admin` has the SAME shape, and it is the same trap** (verified against live prod 2026-07-29,
+  after the V1-rail deploy). Unauthenticated, `/admin/cards`, `/admin/broadcasts`,
+  `/admin/broadcasts/x/approve` and the nonsense control `/admin/definitely-not-a-route` all
+  return **HTTP 403 with the byte-identical body `Forbidden`**. So **a 403 on `/admin/*` proves
+  nothing about whether a route is mounted** — the panel-auth middleware answers before route
+  matching, exactly like the `/api` catch-all. Proving an `/admin` mount requires an
+  authenticated request returning 200 against an authenticated control returning 404.
 - Route mounts go in `src/index.js` **before** the catch-all.
 
 **Dates and timestamps**

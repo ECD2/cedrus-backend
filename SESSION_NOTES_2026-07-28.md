@@ -506,3 +506,19 @@ Railway still runs pre-merge code, and `DAILY_TOKEN_BUDGET`/`DAILY_SMS_BUDGET` a
 DISARMED). After Emil pushes, verify within the hour that `scheduler.started` lists 10 jobs and a
 `budget.check` line appears with real numbers. Then the three frontend adapter reconciliations in
 the night entry above, and flag 18's account-level caps.
+
+**Post-push addendum (2026-07-29 ~09:12 EDT).** Emil authorized the backend push in the boardroom;
+`aed4b25..3a84b8d` pushed, exit 0. Railway deployment `107b2bcd` SUCCESS ~40s later, `/health` 200,
+and the new boot's `scheduler.started` lists **exactly 10 jobs** including the three new ones
+(`budget-guard`, `card-sender`, `card-followup`). Zero error lines. No `budget.check` yet — the job
+runs hourly at :10 and the server booted at 13:10:20 UTC, just past the tick, so the first run is
+~14:10 UTC. Both budget env vars are still unset, so it will announce DISARMED.
+
+**One thing I could NOT prove, honestly reported.** The two new admin routers' HTTP mounts are
+still unproven — the night entry's known gap (a) is still open. Unauthenticated, `/admin/cards`,
+`/admin/broadcasts`, `/admin/broadcasts/x/approve` and the nonsense control
+`/admin/definitely-not-a-route` ALL return 403 with the byte-identical body `Forbidden`. The
+control does not discriminate, so per Lesson 3 I have no proof either way. Recorded in Part 4:
+`/admin` has the same catch-all-auth shape as `/api`. What the deploy DOES prove is that the merged
+code is running — `budget-guard`/`card-sender`/`card-followup` are new modules from this merge and
+they registered at boot. Closing the mount gap needs an authenticated 200 vs an authenticated 404.
