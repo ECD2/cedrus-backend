@@ -87,11 +87,29 @@ so a later session doesn't go hunting for a table that doesn't exist.
 
 **Blockers.** None.
 
-**Did NOT push.** Confirmed. Nothing committed either — the five files are uncommitted in the
-working trees of `cedrus-backend` and `cedrus-frontend`, both still on `main` at their original
-shas. Emil's call whether these go on `main` directly (docs only, no deploy risk in the backend
-repo — but **the frontend `CLAUDE.md` still means a frontend push, and a frontend push is a live
-deploy, Law 6**) or onto a branch first.
+**Did NOT push.** Confirmed — nothing left either repo.
+
+**Committed to local `main` in both repos** on Emil's explicit instruction, after the entry above
+was first written saying nothing was committed. Correcting it here rather than rewriting it, per
+Lesson 13.
+
+- `cedrus-backend` — `77228f6`, ahead of `origin/main` by 1. Four files: the spec, the doctrine,
+  `CLAUDE.md`, this file.
+- `cedrus-frontend` — `d14fa28`, ahead of `origin/main` by 1. One file: `CLAUDE.md`.
+
+Untracked and deliberately left alone: `.claude/` in both repos, `NOTES.md` in the backend.
+
+**Both pushes are still Emil's to make, and they are not equal.** The backend push is docs-only but
+still auto-builds and ships (Law 6). **The frontend push is a live deploy to cedrus.life** — for a
+markdown file that changes nothing a user can see, which makes it low-risk but not zero-ceremony.
+
+```
+cd "/Users/ec/Desktop/Desktop - EC’s MacBook Air/cedrus-backend"  && git push origin main
+cd "/Users/ec/Desktop/Desktop - EC’s MacBook Air/cedrus-frontend" && git push origin main
+```
+
+If either is unwanted, `git reset --hard HEAD~1` on that repo undoes it cleanly — neither commit has
+a child.
 
 **For the next session.** Read the doctrine, then `CEDRUS_V1_SPEC.md`. The preservation law is the
 part most likely to be violated by accident: moving the existing routes to `/classic` is a
