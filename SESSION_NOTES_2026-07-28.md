@@ -434,3 +434,75 @@ without a session (dev-only route, redirects home in production).
 first (migrations → merge → battery → push), then the three adapter reconciliations above, then
 delete each `V1_MOCKED` entry as its real endpoint takes over. The adapter is the only file that
 should need touching for wiring.
+
+---
+
+### Morning merge ceremony — 2026-07-29 ~08:40 EDT
+
+**Scope.** Integrate the three overnight branches. Migrations first, then one merge at a time with
+the gate re-run between each. STOP before push.
+
+**Repo / branch / worktree.** Both repos, `main` directly — no worktree, this IS the integration.
+cedrus-backend from `34559b9`, cedrus-frontend from `d14fa28`.
+
+**Status. SHIPPED-TO-LOCAL-MAIN.** All four migrations applied to prod; all three branches merged;
+every gate re-run on merged main. Nothing pushed.
+
+**What landed.**
+- **Prod schema (4 migrations, runner, in order):** `system_flags`; `opportunity_cards` +
+  `suppressed_pairings` + 4 indexes + `people.met_confirmed_count`/`last_met_confirmed_at`;
+  `broadcasts` + 1 index; `app_users.member_status text NOT NULL DEFAULT 'founding'`.
+- **cedrus-backend `main` → `19cdf87`.** `076a1c8` = the night session's doctrine + notes edits it
+  left staged for this morning (committed first so the merge ran on a clean tree, Law 1).
+  `19cdf87` = merge of `feat/night-2026-07-28-v1-rail`.
+- **cedrus-frontend `main` → `af6be72`.** `be7a211` = merge of `feat/v1-wfh-frontend`;
+  `af6be72` = merge of `docs/marketing-launch-kit`.
+- Doctrine corrected (three claims this ceremony made false) + a new **Frontend gates** block.
+
+**Proof.**
+- **Migrations:** runner pre-check → in-txn verify → COMMIT → fresh post-check, exit 0 each. Then
+  one consolidated live-prod post-check after all four: 4 tables present, 5 indexes present, 3
+  columns present with the right types, every CHECK constraint verbatim, all 4 new tables 0 rows.
+  **Controls:** a table I did not create reads `ABSENT` (so the probe can report absence), and
+  both `app_users.updated_at` values are byte-identical before/after — `ADD COLUMN` did not fire
+  `trg_app_users_updated_at`, and `plan`/`billing_status` are untouched. Both rows `'founding'`.
+- **Backend battery on merged main: `sh test/run-all.sh` → exit 0, 1848 PASS, 0 `^  FAIL`, 0
+  `TEST(S) FAILED`.** Gated on the exit code, not the banner — and this run reproduces the trap:
+  `ALL WS-B SUITES PASSED` sits at line 1766 of 3087 with **12 suite banners after it**. All seven
+  new suites ran green (BUDGET-GUARD, BUDGET-PIPELINE, CARD-STATE, CARD-FAILURE, CARD-PIPELINE,
+  BROADCAST, ONBOARDING-ANSWERS) and so did SAFETY (Law 2). **Re-run at the end: identical.**
+- **Frontend on merged main:** `tsc --noEmit` exit 0; vitest **137/137, 21 files**, exit 0;
+  `bun run build` exit 0 (its 34 "error" log lines are rollup `"use client"` notices from
+  `node_modules/@tanstack/react-router`, not build errors). **`.env.production` sha256
+  `6b2955d3…549cd5`, 3 lines / 163 bytes — verified at session start, before the merge, after the
+  merge, after the production build, and after the marketing merge. Byte-identical throughout.**
+- **Marketing kit is docs-only:** `git diff --name-only main...docs/marketing-launch-kit` = 9 files,
+  all under `marketing/`, zero `src/`. Post-merge, nothing outside `marketing/` changed.
+
+**What looked off.**
+1. **The brief said `docs/marketing-launch-kit` was a cedrus-backend branch. It is not** — it lives
+   in cedrus-frontend (`.claude/worktrees/marketing`). Merged there instead. No such branch exists
+   in the backend.
+2. **Frontend `npm run lint` fails: 104 errors.** It also failed BEFORE any of this work — the
+   control (a detached worktree at pre-merge `d14fa28` with `node_modules` symlinked) reports
+   **103 errors**, all pre-existing `prettier/prettier` formatting. The merge's true net is **+2
+   new errors** (`TodaySections.tsx`, `rings-home.test.tsx` — both just a `/classic/…` path string
+   pushing a line past print width), **−1** (`PageShell.tsx` reflowed), **+3** react-refresh
+   warnings in the new `src/components/v1/` files. The night entry's "eslint 0 errors (3
+   pre-existing-class react-refresh warnings)" describes linting only its own new V1 files; those
+   3 warnings are exactly the 3 I see. **Nobody regressed lint; it was already red.**
+3. **`eslint .` walks `.claude/worktrees/`**, so the raw run reports 314 errors — every finding
+   once per worktree checkout plus once for real. Scope to `npx eslint src`, or ignore `.claude`.
+4. The step-5 battery re-run was on a tree identical to step 2 (the marketing kit went to the
+   frontend, so backend `main` never moved after `19cdf87`). It proves reproducibility, not more.
+
+**Blockers.** None.
+
+**Did NOT push.** Confirmed — nothing left this machine. No deploy, no Railway env change,
+`BRIEF_DRY_RUN` untouched. Backend `main` is ahead of origin by 4, frontend by 3.
+
+**For the next session.** The schema is live but the guard is NOT enforcing: `main` is unpushed so
+Railway still runs pre-merge code, and `DAILY_TOKEN_BUDGET`/`DAILY_SMS_BUDGET` are unset (unset =
+DISARMED). After Emil pushes, verify within the hour that `scheduler.started` lists 10 jobs and a
+`budget.check` line appears with real numbers. Then the three frontend adapter reconciliations in
+the night entry above, and flag 18's account-level caps.
