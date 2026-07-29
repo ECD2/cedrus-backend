@@ -254,4 +254,28 @@ run_js "$(bundle test/prelude-trial-downgrade.js src/jobs/trialDowngrade.js test
 section "entitlements: time-aware planTier"
 run_js "$(bundle test/reliability-core.js src/services/entitlements.js test/entitlements.test.js)"
 
+# ── Bundle 28: budget guard — the cost views get their first consumer ───────
+# Real budget.js + budgetGuard.js over a programmable seam (failure branches are
+# the point: unreadable views, refused upserts, thrown clients — all fail OPEN
+# and all announce). Also pins the >= trip at the budget line and prod's
+# string-bigint shape.
+section "budget guard: usage, verdicts, kill switch"
+run_js "$(bundle test/prelude-budget.js src/services/budget.js src/jobs/budgetGuard.js test/budget-guard.test.js)"
+
+# ── Bundle 29: budget kill switch obeys the pipeline's safety ordering ──────
+# Same concat as Bundle 22 (real safetyDetection.js + selfName.js +
+# pipeline/index.js) plus the __budgetGate knob. Proves: crisis gets 988 even
+# over budget, STOP and the opt-in script outrank the pause, paused replies stay
+# bounded by the per-user cap, and the gate fails open when unreadable.
+section "budget kill switch vs pipeline ordering"
+OUTBG="$(mktemp -t cedrus-tests).js"
+{
+  cat test/prelude-crisis-cap.js
+  strip src/services/safetyDetection.js
+  strip src/pipeline/selfName.js
+  strip src/pipeline/index.js
+  cat test/budget-pipeline.test.js
+} > "$OUTBG"
+run_js "$OUTBG"
+
 printf '\n✅ All test bundles passed.\n'

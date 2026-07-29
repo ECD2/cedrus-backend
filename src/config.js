@@ -7,6 +7,15 @@ function required(name) {
   return v;
 }
 
+// Daily budget envs: a positive number arms that dimension of the budget guard;
+// unset/empty/invalid ⇒ null ⇒ that dimension is DISARMED (and the hourly guard
+// announces the mode on every run — never silently).
+function parseBudgetEnv(raw) {
+  if (raw == null || String(raw).trim() === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
+}
+
 const nodeEnv = process.env.NODE_ENV || 'development';
 const isProduction = nodeEnv === 'production';
 
@@ -42,6 +51,15 @@ export const config = {
   // When true, the brief job composes + records but LOGS instead of sending via Twilio.
   // Lets you tune the brief before A2P registration completes.
   briefDryRun: process.env.BRIEF_DRY_RUN === 'true',
+
+  // Budget guard (night build 2026-07-28, item 1; doctrine flag 17). Units:
+  // DAILY_TOKEN_BUDGET = total OpenAI tokens per UTC day across ALL users
+  // (v_daily_token_usage.total_tokens); DAILY_SMS_BUDGET = SMS segments per UTC
+  // day, BOTH directions (v_daily_sms_usage.sms_segments — segments are what
+  // Twilio bills). Over budget ⇒ the hourly job arms the kill switch: inbound
+  // gets one polite template (crisis exempt), outbound jobs skip.
+  dailyTokenBudget: parseBudgetEnv(process.env.DAILY_TOKEN_BUDGET),
+  dailySmsBudget: parseBudgetEnv(process.env.DAILY_SMS_BUDGET),
 
   // WS-F email brief (MOUNT_N2 §2). The job (src/jobs/briefEmail.js) takes an
   // injectable env object and reads process.env itself; these fields carry only

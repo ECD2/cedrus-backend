@@ -13,6 +13,7 @@ let __onboardingComplete = true;
 let __hasNoHistory = false;
 let __allowed = true;                 // checkRateLimit verdict
 let __compliance = { handled: false };
+let __budgetGate = { paused: false, reason: null, degraded: false }; // STAGE B3.5 verdict (item 1)
 
 // ── Recorders ───────────────────────────────────────────────────────────────
 let __outbound = [];                  // { body, type }
@@ -28,6 +29,7 @@ function __reset(opts) {
   __hasNoHistory = !!o.hasNoHistory;
   __allowed = o.allowed !== false;
   __compliance = o.compliance || { handled: false };
+  __budgetGate = o.budgetGate || { paused: false, reason: null, degraded: false };
   __outbound = []; __calls = []; __openaiInvocations = [];
   __crisisSignals = []; __suppressionWindows = [];
 }
@@ -58,6 +60,7 @@ const usage = { logAgentRun: async () => {} };
 
 async function handleCompliance() { __calls.push('handleCompliance'); return __compliance; }
 async function checkRateLimit() { __calls.push('checkRateLimit'); return { allowed: __allowed, quota: null }; }
+async function getBudgetGate() { __calls.push('getBudgetGate'); return __budgetGate; } // services/budget.js double (item 1)
 async function isInSuppressionWindow() { return false; }
 async function resolveEntities() { return {}; }
 async function persist() { return {}; }
