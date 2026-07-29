@@ -13,6 +13,7 @@ import { isInSuppressionWindow } from '../services/safetyFlags.js';
 import { evaluateSafety } from '../services/safetyDetection.js';
 import { extractSelfName, bareName } from './selfName.js';
 import { getBudgetGate } from '../services/budget.js';
+import * as cards from '../services/cards.js';
 
 // ═══════════════ ONBOARDING COPY — EDIT FREELY, NO CODE BELOW CHANGES ═══════════════
 // MSG_COMPLIANCE is byte-identical to the Opt-In Confirmation Response approved in
@@ -120,6 +121,25 @@ export async function runInboundPipeline({ from, body, messageSid, numSegments }
     }
     // else: fall through into the real pipeline below - their message has
     // actual content the model should extract right now.
+  }
+
+  // ── STAGE B2.6 — opportunity-card replies (V1 card rail, item 2) ───────────
+  // AFTER safety (gated on !crisisOverride: a crisis message must reach the 988
+  // path and must not mutate card state), after compliance and onboarding,
+  // BEFORE the cap and the budget switch. Rationale: replying to a question
+  // Cedrus itself asked is the loop's hinge (spec PART 2 step 4), it costs no
+  // model call, and it is bounded — a user only ever has a handful of cards
+  // awaiting a reply, and once answered, a repeat no longer matches. Exact
+  // vocabulary tokens only (YES/SKIP/LATER/NOT THEM/NEVER, and YES/NO/NOT YET
+  // for follow-ups); anything else falls through to the ordinary pipeline, and
+  // so does every card-rail read failure (fail open — a broken card rail must
+  // never block a real message).
+  if (!crisisOverride) {
+    const cardReply = await cards.handleCardReply({ user, body, sourceMessageId: message.id });
+    if (cardReply.handled) {
+      if (cardReply.reply) await messages.logOutbound({ userId: user.id, body: cardReply.reply, messageType: 'card_reply' });
+      return cardReply.reply;
+    }
   }
 
   // STAGE B3 — abuse cap (cost survival; runs before any model call).

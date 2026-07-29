@@ -278,4 +278,31 @@ OUTBG="$(mktemp -t cedrus-tests).js"
 } > "$OUTBG"
 run_js "$OUTBG"
 
+# ── Bundle 30: card rail — the full state machine over the real fake DB ─────
+# queued→sending→sent→replies→follow-up→met_confirmed; the 3/rolling-7d hard
+# cap; dry-run suppression (zero Twilio calls); send-time suppression re-check;
+# opted-out cancel; §6 hold; daytime window. time.js is real (localParts).
+section "card rail state machine"
+run_js "$(bundle test/reliability-core.js test/prelude-cards.js src/utils/time.js src/services/cards.js src/jobs/cardSender.js src/jobs/cardFollowup.js test/cards-state.test.js)"
+
+# ── Bundle 31: card rail failure honesty (supabase never throws) ────────────
+# Programmable seam: read failures fall through (never block a real message);
+# a failed NOT THEM/NEVER write gets honest copy, never a confident ack.
+section "card rail failure honesty"
+run_js "$(bundle test/prelude-cards-fail.js src/services/cards.js test/cards-failure.test.js)"
+
+# ── Bundle 32: card replies obey the pipeline's safety ordering ─────────────
+# Same concat as Bundles 22/29. compliance > crisis > cards > cap > budget:
+# crisis never touches card state; card acks survive over-cap and over-budget.
+section "card replies vs pipeline ordering"
+OUTCP="$(mktemp -t cedrus-tests).js"
+{
+  cat test/prelude-crisis-cap.js
+  strip src/services/safetyDetection.js
+  strip src/pipeline/selfName.js
+  strip src/pipeline/index.js
+  cat test/cards-pipeline.test.js
+} > "$OUTCP"
+run_js "$OUTCP"
+
 printf '\n✅ All test bundles passed.\n'

@@ -8,6 +8,8 @@ import { runReminderDispatch } from './reminders.js';
 import { runBriefEmails } from './briefEmail.js';
 import { runClarificationExpiry } from './sweeps/clarificationExpiry.js';
 import { runBudgetGuard } from './budgetGuard.js';
+import { runCardSender } from './cardSender.js';
+import { runCardFollowup } from './cardFollowup.js';
 import { shouldRunOutboundJob } from '../services/budget.js';
 
 // Cron times are SERVER time (UTC on Railway). Per-user local timing (e.g. "send
@@ -27,8 +29,10 @@ export function startScheduler() {
   cron.schedule('0 * * * *',    () => guard('weekly-brief-emails', runBriefEmails, { outbound: true })); // WS-F: no-ops unless BRIEF_EMAIL_ENABLED=true
   cron.schedule('30 * * * *',   () => guard('trial-downgrades', runTrialDowngrades));
   cron.schedule('10 * * * *',   () => guard('budget-guard', runBudgetGuard)); // hourly spend check → kill-switch row (item 1)
+  cron.schedule('*/15 * * * *', () => guard('card-sender', runCardSender, { outbound: true })); // V1 card rail (item 2)
+  cron.schedule('25 * * * *',   () => guard('card-followup', runCardFollowup, { outbound: true })); // "did it happen?" 3d post-YES
   cron.schedule('0 3 1 * *',    () => guard('monthly-core-five', runMonthlyCoreFive)); // 1st of month, 03:00 UTC
-  logger.event('scheduler.started', { message: 'jobs: reminder-dispatch, daily-sweeps, clarification-expiry, weekly-briefs, weekly-brief-emails, trial-downgrades, budget-guard, monthly-core-five' });
+  logger.event('scheduler.started', { message: 'jobs: reminder-dispatch, daily-sweeps, clarification-expiry, weekly-briefs, weekly-brief-emails, trial-downgrades, budget-guard, card-sender, card-followup, monthly-core-five' });
 }
 
 // Each tick runs inside its own correlation context so every log line the job

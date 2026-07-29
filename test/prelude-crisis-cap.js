@@ -14,6 +14,7 @@ let __hasNoHistory = false;
 let __allowed = true;                 // checkRateLimit verdict
 let __compliance = { handled: false };
 let __budgetGate = { paused: false, reason: null, degraded: false }; // STAGE B3.5 verdict (item 1)
+let __cardResult = { handled: false, reply: null };                  // STAGE B2.6 verdict (item 2)
 
 // ── Recorders ───────────────────────────────────────────────────────────────
 let __outbound = [];                  // { body, type }
@@ -30,6 +31,7 @@ function __reset(opts) {
   __allowed = o.allowed !== false;
   __compliance = o.compliance || { handled: false };
   __budgetGate = o.budgetGate || { paused: false, reason: null, degraded: false };
+  __cardResult = o.cardResult || { handled: false, reply: null };
   __outbound = []; __calls = []; __openaiInvocations = [];
   __crisisSignals = []; __suppressionWindows = [];
 }
@@ -61,6 +63,7 @@ const usage = { logAgentRun: async () => {} };
 async function handleCompliance() { __calls.push('handleCompliance'); return __compliance; }
 async function checkRateLimit() { __calls.push('checkRateLimit'); return { allowed: __allowed, quota: null }; }
 async function getBudgetGate() { __calls.push('getBudgetGate'); return __budgetGate; } // services/budget.js double (item 1)
+const cards = { handleCardReply: async () => { __calls.push('handleCardReply'); return __cardResult; } }; // services/cards.js double (item 2)
 async function isInSuppressionWindow() { return false; }
 async function resolveEntities() { return {}; }
 async function persist() { return {}; }
