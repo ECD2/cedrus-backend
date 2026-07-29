@@ -7,6 +7,8 @@ import healthRouter from './routes/health.js';
 import adminRouter from './routes/admin.js';
 import adminPanelRouter from './routes/adminPanel.js';
 import adminCardsRouter from './routes/adminCards.js';
+import adminBroadcastsRouter from './routes/adminBroadcasts.js';
+import broadcastsRouter from './routes/api/broadcasts.js';
 import { adminAuthRouter, adminSessionAdapter } from './routes/adminAuth.js';
 import apiRouter from './routes/api/index.js';
 import onboardRouter from './routes/api/onboard.js';
@@ -44,6 +46,7 @@ app.use('/admin', adminAuthRouter);     // MOUNT_ADMIN_AUTH: POST /admin/auth/lo
 app.use('/admin', adminSessionAdapter); // MOUNT_ADMIN_AUTH: Bearer session → req.adminSession + injected x-admin-key
 app.use('/admin', adminPanelRouter); // N1 panel — must precede adminRouter (MOUNT_N1)
 app.use('/admin', adminCardsRouter); // V1 card queue (item 2) — per-route auth, precedes founder catch-all
+app.use('/admin', adminBroadcastsRouter); // V1 broadcasts (item 3) — draft only; approve is the only sender
 app.use('/admin', adminRouter);
 app.use('/api/onboard', onboardRouter); // PUBLIC website onboarding — must precede the authed /api router (MOUNT_WEBONBOARD)
 app.use('/api/import', importRouter);   // NF2-IMPORT: chat-memory import (JWT, raw upload) — MUST precede the authed /api router (MOUNT_IMPORT)
@@ -51,6 +54,7 @@ app.use('/api/interests', interestsRouter); // NF2-SOURCES: user interests CRUD 
 app.use('/api/insights', insightsRouter); // INFRA-10: read-only insight engine feed (JWT, self-carries json+requireUser) (FLAGS_FROM_INSIGHTS)
 app.use('/api/reminders', remindersRouter); // UI-09: read-only upcoming reminders + delivery state (JWT, self-carries json+requireUser)
 app.use('/api/goals', goalsRouter); // INFRA-15: user-set goals CRUD + vital few (JWT, self-carries json+requireUser)
+app.use('/api/broadcasts', broadcastsRouter); // V1 web feed (item 3): GET /active (JWT, self-carries json+requireUser)
 app.use('/api', apiRouter);      // N3: web capture, priority swap, restore (MOUNT_N3)
 
 // eslint-disable-next-line no-unused-vars

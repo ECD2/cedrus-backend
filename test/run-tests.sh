@@ -305,4 +305,11 @@ OUTCP="$(mktemp -t cedrus-tests).js"
 } > "$OUTCP"
 run_js "$OUTCP"
 
+# ── Bundle 33: admin broadcasts — draft → explicit approve → send/publish ───
+# Real broadcasts.js + real time.js over the fake DB. Quiet hours 21–09 ET
+# (boundary pinned), the 1/ET-day cap, the 500-recipient refusal, opted-out
+# exclusion, dry-run = zero Twilio calls, kill-switch refusal, web feed.
+section "admin broadcasts"
+run_js "$(bundle test/reliability-core.js test/prelude-broadcasts.js src/utils/time.js src/services/broadcasts.js test/broadcasts.test.js)"
+
 printf '\n✅ All test bundles passed.\n'
