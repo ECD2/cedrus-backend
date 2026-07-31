@@ -1,4 +1,5 @@
-READ CEDRUS_OPERATING_DOCTRINE.md BEFORE STARTING ANY WORK.
+READ `CEDRUS.md` (repo root) BEFORE STARTING ANY WORK. It is the single source of truth and
+replaced `CEDRUS_OPERATING_DOCTRINE.md` on 2026-07-31.
 
 # Cedrus — Backend
 
