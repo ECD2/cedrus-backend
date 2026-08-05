@@ -1,8 +1,10 @@
 # CEDRUS
 
-**The single source of truth. Frozen 31 July 2026. Change only by explicit decision, recorded with a date.**
+**The single source of truth. Frozen 31 July 2026. Part I revised 4 August 2026 (the reboot). Change only by explicit decision, recorded with a date.**
 
 This document replaces `CEDRUS_V1_MASTER.md` and `CEDRUS_OPERATING_DOCTRINE.md`. `CEDRUS_V1_SPEC.md` is **retired**: it describes a superseded product direction and must not be read as canon.
+
+**2026-08-04.** Part I was reconciled with the approved connected, goal-aware product direction. Every changed decision is recorded with its prior wording in **Part I section 22**. **Part II was not touched and is byte-for-byte unchanged.** Part III was corrected only where an audit of current `main` produced direct evidence, and each correction names that evidence. The working documents for the reboot are `docs/CEDRUS_REBOOT_PLAN_2026-08-04.md` (product, UX, architecture, reuse matrix, language audit) and `docs/NEXT_BUILD_PROMPT_CEDRUS_MIAMI.md` (the first implementation slice). Neither is canon. Where they disagree with this file, this file wins.
 
 ---
 
@@ -17,6 +19,8 @@ This document replaces `CEDRUS_V1_MASTER.md` and `CEDRUS_OPERATING_DOCTRINE.md`.
 | A session touching a repo for the first time | **Part III first**, then II |
 | A session debugging anything | **II.4** (lessons) and **II.5** (verified environment facts) *before* forming a hypothesis |
 | Anyone about to publish something public | **Part I section 13**, the language doctrine |
+| A session adding or widening any connection | **Part I sections 18 and 19**, plus section 7. Widening a calendar scope changes a trust promise and needs Emil, not a code review. |
+| A session building anything a member will read as advice | **Part I section 20**, pace cards. The four kinds of statement must stay distinguishable. |
 
 Every session prompt should name which parts to read. A prompt that says "read CEDRUS.md" and nothing else is a bad prompt.
 
@@ -39,17 +43,25 @@ Part II has no labels. Sections II.0 through II.4 are law. Sections II.5 through
 
 What we are building, for whom, and in what words. Read by humans and by any session doing product or copy work.
 
+**Revised 2026-08-04 (the reboot).** Sections 1 through 17 were reconciled with the approved connected, goal-aware direction. Sections 18 through 22 are new. Every decision that changed is recorded in section 22 with its prior wording and the reason it moved. Nothing was silently deleted. Part II was not touched.
+
 ## 1. The company in one line
 
-> Cedrus helps you have a better day. Find where to go, who to meet, and what to do.
+> Cedrus keeps your day on pace with what you said matters.
 
-**Status: LOCKED.**
+**Status: LOCKED as the orienting definition. NOT approved as public copy.**
 
-This is the orienting definition. It may be used in marketing when approved, but its main job is keeping every decision pointed the same way.
+This is the sentence every decision gets checked against. It is not a headline. Public wording goes through the language doctrine in section 13, where the current public company line is under audit.
 
-Internal category definition, not for public use: Cedrus is the local network and assistant for people with flexible days.
+A longer internal formulation, useful when the one liner is too compressed:
+
+> Cedrus connects what matters to you with the time and opportunities your real day actually has.
+
+**What Cedrus is not.** Not a generic AI assistant, not a chatbot with a Miami accent, not a productivity tracker, not a fitness app, not an events company. The difference is that Cedrus holds two things at once: what you said you wanted, and what your day actually looks like. A generic assistant answers the question you typed. Cedrus notices the question you did not type, because it knows what you are trying to do this month and how much of today is still unspoken for.
 
 **Geographic line: use "Built for Miami" in marketing.** "Built for life in Miami" reads well in a document and reads long on a page. The short version is the CTA version.
+
+**Prior version, replaced 2026-08-04:** "Cedrus helps you have a better day. Find where to go, who to meet, and what to do." It survives as a candidate public line in section 13, where it is classified REVISE. It was demoted from the orienting definition because it describes a directory of options rather than a system that tracks whether the day moved.
 
 ---
 
@@ -65,38 +77,47 @@ The strikethrough is not decoration. It encodes the expansion path: a better rem
 
 **Geography (LOCKED):** Built for life in Miami. Miami only, on purpose. No second city until Miami passes its gate.
 
+Unchanged by the reboot. The wedge was never the problem.
+
 ---
 
 ## 3. The business engine
 
 This is the mechanism by which Cedrus becomes more valuable over time. Every feature should serve one of these steps.
 
-1. The landing page attracts Miami remote workers.
-2. Profiles give Cedrus usable context about each member.
-3. Today and the SMS assistant create value for one member, alone, on day one.
-4. Cedrus workdays create reliable local activity that does not depend on density.
-5. Attendance and unprompted requests reveal what members actually want.
-6. More members produce more places, more people, and more plans.
-7. Higher local density makes Cedrus better for every existing member.
-8. Membership monetizes recurring utility and access.
+1. The landing page attracts Miami remote and hybrid workers.
+2. Onboarding and a small number of stated goals give Cedrus usable context about each member.
+3. Today and the SMS assistant create value for one member, alone, on day one, with no other members and no connected accounts.
+4. Authorized connections (Calendar first) make that value better targeted, because Cedrus stops guessing at when the day is actually open.
+5. Confirmed outcomes ("that helped", "I did it", "not today") teach Cedrus which suggestions are worth making again.
+6. Manual fulfillment by Emil exposes repeated demand before anything is automated. What he ends up doing by hand twice a week is the next feature.
+7. Lightweight Miami experiments test real world needs cheaply, without committing to a recurring hosted event.
+8. Optional physical activations run only where evidence already shows demand.
+9. Accumulated usage improves Places, People, Plans, and Progression for every member.
+10. Network utility emerges after individual utility works, never before.
+11. Membership monetizes recurring utility first and access second.
 
-The assistant serves the local network. The local network improves the assistant.
+**The load bearing change, 2026-08-04.** Step 4 of the previous engine was "Cedrus workdays create reliable local activity that does not depend on density," and the whole engine rested on it. It has been removed as a required step. **Cedrus must be useful during a week in which Emil hosts nothing.** If the engine only turns when a founder is standing in a room, it is an events business with software attached.
+
+The assistant serves the member. Accumulated member outcomes improve the assistant. The local network improves both, later.
 
 ---
 
 ## 4. Places, People, Plans, Progression
 
-**Status: LOCKED as the product system.** If a proposed feature does not sit under one of these four, it does not get built.
+**Status: LOCKED as the product system.** If a proposed feature does not sit under one of these four, it does not get built. The four names are unchanged. What they mean was widened on 2026-08-04, because the previous definitions assumed a hosted workday and a relationship graph that the product no longer leads with.
 
-**Places.** Somewhere good to work today, based on neighborhood, calls, and weather.
+**Places.** Where the user's day could happen. Uses Miami context, stated preferences, weather, neighborhood, schedule constraints, and what worked the last time. Not a directory. A place only surfaces when it fits a specific window in a specific day.
 
-**People.** Cedrus workdays, and opt-in members who want the same kind of day.
+**People.** Existing relationships the user tells Cedrus about, opted in Cedrus members, and specific approved introductions when they are actually relevant. Governed entirely by the trust law in section 7. Cedrus does not introduce anyone to anyone in the founding release.
 
-**Plans.** Ask Cedrus what to do, who to invite, or how to make it happen.
+**Plans.** The next realistic action Cedrus can suggest, prepare, or help schedule. Realistic is the operative word: a plan that does not fit the time the user actually has is not a plan, it is a suggestion that produces guilt.
 
-**Progression (LATER).** Progression shows which places, people, and recurring activities are becoming part of a member's real life, through confirmed offline participation.
+**Progression (LOCKED as a founding concept, TEST as an implementation).** Whether the user's real days are moving toward the goals, relationships, places, routines, and experiences the user selected. Progression is the answer to "is this working," and it is what separates Cedrus from a recommender.
 
-Progression explicitly does not count: opening Cedrus, completing tasks, app streaks, messages sent, or arbitrary wellness goals. For the first 25 members it stays conceptual. The garden does not get built yet.
+Progression explicitly does not count: opening the app, app use streaks, messages sent, screens viewed, tasks checked off solely inside Cedrus, or arbitrary wellness scores. It counts confirmed movement in the real day.
+
+**Changed 2026-08-04.** Progression was LATER and explicitly deferred ("For the first 25 members it stays conceptual. The garden does not get built yet."). It is now a founding concept because the reboot makes progression the product's core claim rather than a reward layer. The *garden visualisation* stays unbuilt. Progression in the founding release is a small honest record of what was suggested, what the user did, and whether it helped.
 
 ---
 
@@ -110,47 +131,88 @@ Not: people who commute to an office five days a week, or people outside Miami.
 
 People who explicitly want to meet new people are **in scope and welcome**. Cedrus does not introduce anyone to anyone yet, and the trust law governs how it ever will, but wanting a fuller social life is a reason to join rather than a reason to be filtered out.
 
+**Clarified 2026-08-04.** Attendance at a hosted Cedrus workday is **not** part of this definition and never was a filter. The previous founding release made attendance the main event, which quietly narrowed the customer to "people who will come to a thing on a Friday." The customer is a person with a controllable day, whether or not they ever meet Emil in person.
+
 ---
 
 ## 6. The founding release
 
-Five things. Nothing else ships before 21 August.
+Eight things. This replaces the previous five item release and its 21 August deadline.
+
+Nothing here is gated on a hosted event, a venue, or a date.
 
 ### 6.0 Fix the door (PREREQUISITE, not a feature)
 
-Today no stranger can join Cedrus by either path. Web onboarding writes answers to browser storage and never sends them, the phone step is suppressed by a dry run flag, and texting START returns a returning-user reply that permanently skips the onboarding script. Every other item on this list is untestable until this is closed.
+Carried forward unchanged in intent, and still true. No stranger can complete a path into Cedrus today. Web onboarding wrote answers to browser storage without sending them, the phone step was suppressed by a dry run flag, and texting START returns a returning-user reply that skips the onboarding script. Every item below is untestable until a real stranger can get in. The 2026-07-29 work (`POST /api/onboarding/answers`, `GET /api/me`) built part of this and is unpushed, so it is not live.
 
-### 6.1 Landing and join flow (LOCKED)
+### 6.1 cedrus.miami landing and join flow (LOCKED)
 
-Hero, one sourced proof point, Places / People / Plans, the product demonstration, the upcoming Cedrus workday, and a form collecting **name, email, and phone**. Signups stored in Supabase.
+Mobile first. The new positioning, the wedge, one sourced proof point, an honest description of what Cedrus does on day one, and a form collecting name, email, and phone with separate email and SMS consent. Stored in Supabase.
 
-Naming honesty rule: if a person can complete a profile and use Cedrus, the button says join. If they cannot access anything yet, it is a waitlist and it says so.
+Naming honesty rule (unchanged): if a person can complete a profile and use Cedrus, the button says join. If they cannot access anything yet, it is a waitlist and it says so.
 
-### 6.2 Fast member profile (LOCKED)
+### 6.2 Fast onboarding and profile (LOCKED)
 
-Neighborhood, remote or hybrid schedule, where they like to work, interests, what they want from Cedrus, openness to member introductions, phone verification. Every screen is one tap or one short answer. Only name and phone are required.
+Neighborhood, remote or hybrid schedule, the windows in the week that are usually flexible, where they like to work, what they are into, what they want from Cedrus, openness to member introductions, phone verification. Every screen is one tap or one short answer. Only name and phone are required.
 
-### 6.3 Today (LOCKED)
+### 6.3 A small number of user-selected goals (LOCKED)
 
-The member's home surface, answering three jobs:
+At most three at first, one per lane:
 
-- **Places:** where could I work today?
-- **People:** which Cedrus workday or member opportunity is coming up?
-- **Plans:** what could improve the open part of my day?
+- one work goal;
+- one people or social goal;
+- one body, activity, or personal goal.
 
-Plus: ask Cedrus.
+Three is a ceiling, not a quota. One goal is a valid profile. The lanes exist so Cedrus can tell "I want to ship the beta" apart from "I want to see friends more than once a month," which are reconciled against the day very differently.
 
 ### 6.4 Gated SMS assistant (LOCKED)
 
-Unlocked after profile completion. **Open input, narrow promise.** Accepts any text. Reliably handles four jobs: find somewhere to work, find Cedrus workdays and local activity, connect with a member through double opt-in, make or schedule a simple plan. Anything outside those four gets an honest answer and a logged request. It is never positioned as a general assistant.
+Unlocked after onboarding. **Open input, narrow promise.** Accepts any text. Reliably handles a small set of jobs: find somewhere to work, suggest what to do with an open window, help make or schedule a simple plan, record what actually happened, and answer questions about the user's own goals and progress. Anything outside that gets an honest answer and a logged request. It is never positioned as a general assistant.
 
-**Configurable tone (LOCKED as intent, TEST as implementation).** The intent is free form: a member tells Cedrus how to talk to them, in their own words, and it does. The week two implementation is three presets to produce evidence quickly. Free form is the destination, not the presets.
+**Configurable tone (LOCKED as intent, TEST as implementation).** Unchanged: a member tells Cedrus how to talk to them, in their own words, and it does. Presets are a shortcut to evidence, not the destination.
 
 Compliance and safety responses are never tone shifted. STOP, HELP, and anything touching a person in distress stay in a fixed register regardless of setting.
 
-### 6.5 One recurring Cedrus workday (LOCKED)
+**Removed from this list 2026-08-04:** "find Cedrus workdays and local activity" as a *named reliable job*, and the fifth job added by section 15 ("read the admin and community calendar in order to answer questions about upcoming events"). Both existed to serve a recurring hosted workday that is no longer LOCKED. Event questions still get an honest answer and a logged request like anything else. If activations resume, the job comes back with them.
 
-Same weekday, same time, same general area. Hosted by Emil. RSVP, attendance, and repeat attendance tracked. This is the liquidity, manufactured by hand, once a week.
+### 6.5 Google Calendar read-only availability connection (LOCKED as the first connection, TEST as a demand hypothesis)
+
+Full scope and boundaries in section 19. Read-only, least privilege, availability first. **Not a prerequisite for the first useful experience.**
+
+### 6.6 Mobile-first Today (LOCKED)
+
+The member's home surface. Small. It answers, for today specifically:
+
+- what is the state of my day;
+- what is the one thing Cedrus suggests I do with it;
+- did the thing I said I would do actually happen.
+
+Today must be useful **before** Calendar is connected. See section 6.9.
+
+### 6.7 Manually reviewed pace cards (LOCKED)
+
+A pace card is the unit of Cedrus's output. Definition and rules in section 20. In the founding release **every card is reviewed by Emil before it reaches a member.** Manual review is the point, not a limitation: it is how the repeated jobs get discovered before anything is automated.
+
+### 6.8 Clear privacy and connection controls (LOCKED)
+
+A member can see, at any time and in plain language, what Cedrus is connected to, what that connection can read, what it cannot, and how to disconnect it. Disconnecting takes one action and does not require a conversation. This ships **with** the first connection, not after it.
+
+### 6.9 Today before Calendar
+
+Today shows value on day one, with nothing connected. Before Calendar it may use:
+
+- stated goals;
+- user-reported plans and commitments;
+- neighborhood;
+- remote or hybrid schedule and the usual flexible windows;
+- stated preferences;
+- recent user messages;
+- Miami context (weather, day of week, what is on);
+- manual operator support.
+
+**After Calendar connection** it may additionally use availability (free/busy) to place a suggestion in a window that is genuinely open, and to stop suggesting things into a wall of meetings.
+
+**The rule: Calendar improves timing. It does not unlock the product.** A member who never connects anything must still get a useful Today. If Today is empty without Calendar, the connection is carrying weight the product should be carrying.
 
 ---
 
@@ -158,23 +220,32 @@ Same weekday, same time, same general area. Hosted by Emil. RSVP, attendance, an
 
 **Status: LOCKED. This is doctrine, not preference. No session invents its own answers here.**
 
+Unchanged by the reboot except for item 9, which is clarified rather than weakened, and item 10, which is new and follows from connections.
+
 1. No passive or continuous location sharing.
 2. Map activity represents explicit RSVPs, check ins, or venue level sharing only.
 3. No fabricated activity counts, ever. If three people are going, it says three.
 4. Introductions are double opt in.
 5. Phone numbers are not revealed before both people consent, per introduction. A blanket setting at signup is not consent to a specific person months later.
-6. Cedrus does not contact another person without the initiating member's approval.
+6. Cedrus does not contact a person who is not a member. Cedrus may contact an existing member about a specific introduction only with the consent this law requires, and only at the initiating member's request.
 7. Members control whether they can be recommended, and can turn it off at any time.
 8. The founding beta exposes no browsable public directory.
-9. Exact calendars stay private. Only relevant availability may be used, and only later.
+9. **Exact calendars stay private.** Connected calendar data is used to understand *when the day is open*, never rendered back as a calendar, never used to build a picture of who the member meets, and never shown to another member in any form.
+10. **Connected data is used only for the purpose the member authorized.** Data from one connection is not silently reused for an unrelated feature. A new use of already-connected data is a new authorization.
 
 ---
 
-## 8. The next two
+## 8. Later
 
-**Sunday brief (LATER).** By email, with an SMS preview. Upcoming Cedrus workdays, useful remote work windows, one place recommendation, one relevant local thing. It is about Miami and the community, not about the individual, until there is enough per member data to make a personal brief good. Ships after 25 members exist.
+Not in the founding release. Directionally right.
 
-**Progression (LATER).** As defined in section 4. After repeated behavior has been observed, not before.
+**Weekly pace report (LATER).** The natural successor to the Sunday brief now that email is no longer carrying event logistics. Personal rather than civic: what you said mattered, what your week actually held, what moved, and one thing to try next week. It ships only after pace cards have been running long enough that the report has something true to say. See section 15.
+
+**Introductions (LATER, and gated by the trust law).** Not built in the founding release.
+
+**The garden (LATER).** The visual expression of Progression. Progression itself is a founding concept (section 4); the garden is its eventual surface and stays unbuilt until there is real progression data to draw.
+
+**Prior version, replaced 2026-08-04:** "Sunday brief (LATER) ... about Miami and the community, not about the individual ... Ships after 25 members exist." The civic brief assumed a community calendar and a hosted cadence. The personal pace report fits the new direction and does not depend on Emil hosting anything.
 
 ---
 
@@ -182,48 +253,56 @@ Same weekday, same time, same general area. Hosted by Emil. RSVP, attendance, an
 
 **Status: NOT NOW.** Written down so no session invents them.
 
-Personal Google Calendar rendering or sync. Gmail integration. Autonomous meeting scheduling. A public member directory. Direct phone number disclosure. Event hosting software. Payments and promoted events. Complex matching. A generic habit system. Multiple subscription tiers. An advanced garden. Multi city infrastructure. Member hosted events.
+Personal Google Calendar rendering or sync. Gmail integration. Any calendar write access, including autonomous event creation and autonomous meeting scheduling. A direct Strava or fitness-device integration. A public member directory. Direct phone number disclosure. Event hosting software. Payments and promoted events. Complex matching. A generic habit system. Multiple subscription tiers. An advanced garden. Multi city infrastructure. Member hosted events. A large dashboard.
 
 Note on member hosted events specifically: at 100 members, three member hosted events draw four people each and all three read as dead. Emil is the concentrator until density can fill a member's event.
 
+**Added 2026-08-04:** calendar write access of any kind, direct fitness integrations (see section 21), and a large dashboard. **Removed 2026-08-04:** nothing. Every prior prohibition still stands.
+
 ---
 
-## 10. The 21 day launch
+## 10. The founding test
 
-First Cedrus workday: **Friday 21 August 2026.**
+**Replaces "The 21 day launch." Status: LOCKED as the shape. No date is locked.**
 
-Publishing rule: the date does not go on the public page until the venue is confirmed. A public countdown is a promise, and a broken one costs the list.
+The previous plan was a three week countdown to a hosted workday on Friday 21 August 2026. That date is removed as a commitment. What replaces it is behavior driven: the founding test ends when the validation gate in section 11 is answered, not when a calendar day arrives.
 
-### Week 1, 30 July to 5 August
-- Fix the door.
-- Ship the landing page and the join flow.
-- Instagram live, content cadence started.
-- Confirm the 21 August venue, then publish the date.
-- At least five conversations with real Miami remote workers.
+**The August 21 workday was never a public commitment.** The test email went only to Emil. No venue was confirmed. No money was committed. Nobody outside the founder was promised a room. This is recorded so that removing it is understood as cancelling an internal plan, not breaking a promise. See section 22 for the full record, and III.3 for the code and schema that still encode the date.
 
-### Week 2, 6 to 12 August
-- Fast profile shipped.
-- SMS gated behind profile completion.
-- Three tone presets: casual, direct, warm.
-- The four initial SMS jobs working reliably.
-- First five testers using it. Read and categorize every conversation.
+### Phase 1. The door works
+A stranger can join at cedrus.miami, complete onboarding, set at least one goal, and receive something useful. No hosted event required. No connection required.
 
-### Week 3, 13 to 21 August
-- Today shipped with real Miami places and the upcoming workday.
-- RSVP and reminder logistics running.
-- Full funnel tested by at least five people who did not help build it.
-- **Friday 21 August: first Cedrus workday.**
-- Collect attendance, repeat intent, and unprompted requests.
+### Phase 2. Cedrus is useful once
+At least one member receives a pace card, acts on it or explicitly rejects it, and confirms whether it helped. This is the first real signal in the entire company.
 
-Customer contact happens every week. Without it, 21 days becomes another internal build cycle.
+### Phase 3. Cedrus is useful repeatedly
+Members come back. Requests start clustering. Emil is doing the same manual thing more than twice a week, which names the next feature.
+
+### Phase 4. The gate
+Section 11, answered with evidence.
+
+Customer contact happens every week regardless of phase. Without it, a behavior driven plan becomes an internal build cycle with no clock at all, which is a worse failure than a missed date.
 
 ---
 
 ## 11. The validation gate
 
-Signups are acquisition data, not product proof.
+Signups are acquisition data, not product proof. This was true before the reboot and is more true now that there is no event to count attendance at.
 
-**A better day** is recorded when a member confirms Cedrus helped them do one of: work from a recommended place, attend a Cedrus workday, spend time with another person, make or join a plan, or start a recurring offline activity.
+**A better day** is recorded when a member confirms Cedrus helped them do one of: work or spend time somewhere Cedrus suggested, make or keep a plan, spend time with another person, start or continue a recurring activity they told Cedrus mattered, or use a window of their day for something they said they wanted instead of letting it pass.
+
+**The evidence the gate needs.** Each of these is a distinct measurable event, not a vibe:
+
+- completed onboarding;
+- at least one meaningful goal established, in the member's own words;
+- useful context supplied manually, connected via Calendar, or both;
+- SMS used at least once unprompted;
+- a pace card delivered;
+- a pace card acted on, edited, rejected, or deferred (all four are signal; only silence is not);
+- a member confirming that Cedrus improved a real decision or a real day;
+- return usage after the first week;
+- repeated requests clustering around one or two jobs;
+- willingness to pay, expressed unprompted or in a direct ask.
 
 **The gate:**
 
@@ -235,13 +314,17 @@ Signups are acquisition data, not product proof.
 
 Nothing labelled LATER gets built until this passes.
 
+**Changed 2026-08-04:** "attend a Cedrus workday" was one of the five ways to record a better day. It has been removed as a *required* path and folded into "make or keep a plan," so that a member who never attends anything can still complete a better day. The five gate thresholds are unchanged.
+
 ---
 
 ## 12. Membership hypothesis
 
-**Status: TEST.** Internal only. Not on the landing page.
+**Status: TEST. Internal only. Not on the landing page.**
 
-One membership. No tiers. Initial price to test after the gate: **$15 per month.** It buys the daily utility first and access to the network second, because the utility works at one member and the network does not.
+One membership. No tiers. **No price is locked in this session.** The previous $15 per month figure remains the internal starting hypothesis to test after the gate, and it is a hypothesis, not a decision.
+
+It buys the daily utility first and access to the network second, because the utility works at one member and the network does not.
 
 Public founding member language, finite by construction:
 
@@ -253,15 +336,49 @@ Public founding member language, finite by construction:
 
 Every session that writes copy reads this section first. It overrides any earlier marketing document.
 
+**Audited line by line on 2026-08-04.** The full audit, with prior wording and reasons, is in `docs/CEDRUS_REBOOT_PLAN_2026-08-04.md` section 26. This section carries only the *active* doctrine. A line that was retired is named here so nobody reintroduces it by accident.
+
 ### Approved lines
 
-**Tagline**
+**Tagline (KEEP, LOCKED)**
 > Have a better ~~remote~~ day.
 
-**Company line**
+**Badge pill above the hero (KEEP, LOCKED): `Building · Miami`.**
+
+Honest about the stage, local, and it replaces the template's "Get early access," which promises access to something that does not exist yet.
+
+**Miami (KEEP)**
+> Cedrus starts in Miami because knowing what is actually happening here this week is half the product.
+
+**Proof (KEEP)**
+> Remote work gave you more control over your day. Cedrus helps you use it well.
+>
+> A 2026 study of 588,322 workers found that remote work increased time spent alone by 58%. Cedrus is built for the parts of the day that still need somewhere to go.
+
+Source: Emanuel et al., "Home alone: Remote work, isolation, and mental health," Science, 2026. Link it wherever it appears.
+
+**Founding member language (KEEP)**
+> Founding members join the beta free and help shape what Cedrus becomes in Miami. Major changes come directly from Emil.
+
+### Lines under revision
+
+**Company line (REVISE, NEEDS EMIL DECISION).** The current approved public line is:
+
 > Cedrus helps you have a better day. Find where to go, who to meet, and what to do.
 
-**Hero, locked for the waitlist page**
+It is still true and still usable, but it describes three lookups rather than the thing that makes Cedrus different, which is that it remembers what you said you wanted and checks whether the day moved. Candidate replacements, none approved:
+
+| # | Candidate |
+|---|---|
+| A | Cedrus helps you have a better day. It knows what you are working toward, and what your day has room for. |
+| B | Tell Cedrus what matters. It helps you fit it into the day you actually have. |
+| C | Cedrus keeps your day on pace with what you said matters. |
+| D | (keep the current line unchanged) |
+
+Emil picks. Until he does, the current line stays approved and in use.
+
+**Hero (REVISE, NEEDS EMIL DECISION).** The current locked waitlist hero is:
+
 > # Have a better ~~remote~~ day.
 >
 > Have a better day with Cedrus. Where to go? Who to meet? What to do?
@@ -270,34 +387,52 @@ Every session that writes copy reads this section first. It overrides any earlie
 >
 > Name. Email. Phone. That is all.
 
-**Badge pill above the hero: `Building · Miami`.**
-
-**Status: LOCKED.** Replaces the template's "Get early access," which promises access to something that does not exist yet. "Founding beta" was considered and rejected as too niche. `Building · Miami` is clean, honest about the stage, and local.
+The H1 and the CTA are KEEP. The subheadline inherits the company line decision above and moves with it. "Name. Email. Phone. That is all." is KEEP and is doing real work: it is the honest answer to "what is this going to cost me."
 
 ### Headers under test
 
-These are approved for testing. Ranked by Emil, 1 is his current favorite. Run them, do not debate them.
+Approved for testing. Ranked by Emil, 1 is his current favorite. Run them, do not debate them. **Reduced from six to four on 2026-08-04**; the two retired lines are recorded in section 22.
 
 | Rank | Header |
 |---|---|
 | 1 | Your local assistant for finding a place, making a plan, and meeting people in Miami. |
 | 2 | Places to go. People to meet. Plans worth making. Built for Miami. |
 | 3 | Ask where to work, what to do, or who wants to join. Cedrus helps you make the plan. |
-| 4 | Find a better place to work and people to spend the day. |
-| 5 | Cedrus brings together the places, people, and plans that can make today better. |
-| 6 | Text Cedrus when you want to get out, find something to do, or meet people nearby. |
+| 4 | Cedrus brings together the places, people, and plans that can make today better. |
 
 Note that 1 and 2 are different strategies, not different wordings. Number 1 sells an assistant, number 2 sells a life. Test one against the other first, before testing anything else.
 
-**Proof**
-> Remote work gave you more control over your day. Cedrus helps you use it well.
->
-> A 2026 study of 588,322 workers found that remote work increased time spent alone by 58%. Cedrus is built for the parts of the day that still need somewhere to go.
+**A fifth strategy is untested and NEEDS EMIL DECISION before it enters the rotation:** a header that leads with the goal-aware claim rather than the lookup claim. Example, not approved: "Tell Cedrus what matters this month. It helps you find the time." This is the only header that expresses the reboot, so testing it against number 1 is probably worth more than testing 3 against 4.
 
-Source: Emanuel et al., "Home alone: Remote work, isolation, and mental health," Science, 2026. Link it wherever it appears.
+### Retired lines
 
-**Miami**
-> Cedrus starts in Miami because knowing what is actually happening here this week is half the product.
+Do not reuse these. Each is retired because it promises or implies a recurring hosted workday, a confirmed venue, or a date that no longer exists.
+
+| Retired line | Was used for |
+|---|---|
+| The most remote day of the week. | The Friday workday angle |
+| Four days in. One day with us. | The Friday workday angle |
+| Friday is everyone's remote day. Let's use it. | The Friday workday angle |
+| Find a better place to work and people to spend the day. | Header under test, rank 4 |
+| Text Cedrus when you want to get out, find something to do, or meet people nearby. | Header under test, rank 6 |
+| A better ~~remote~~ day is coming. | Email 1 opener. "Is coming" promises a dated arrival. |
+
+The Friday angle itself (Friday is the most common work from home day for hybrid workers) is a **true and useful insight** and is preserved in section 15. Only the copy that sold a Friday *event* is retired.
+
+### Trust statements
+
+**Status: KEEP, all of them, strengthened rather than relaxed.** These are the public expression of section 7 and they are not negotiable in copy.
+
+- Cedrus does not contact people who are not members.
+- Introductions are double opt in, per introduction.
+- Your exact calendar stays private. Cedrus uses it to see when your day is open, not to read your life.
+- Connected accounts are used only for what you turned them on for.
+- No fabricated activity counts. If three people are going, it says three.
+- You can disconnect anything, at any time, in one action.
+
+**Drafting rule for connection copy.** Say what Cedrus reads, say what it does not read, and say it in the same breath. "Cedrus reads when you are free. It does not read who you are meeting or what your events are called." A privacy claim that only lists what is safe is not a privacy claim.
+
+**Do not write forever-promises.** Voice rule 3 already bans never/forever/always/guaranteed and it applies here with force. "Cedrus will never write to your calendar" is a trap: user approved event creation is an explicitly planned future test (section 19). Write the true present-tense version: "Cedrus does not create or change events." That is honest today and does not have to be broken later.
 
 ### Voice rules
 
@@ -310,6 +445,7 @@ Source: Emanuel et al., "Home alone: Remote work, isolation, and mental health,"
 7. **No statistic without a linkable source in the same place it appears.**
 8. **Sentence case everywhere.** Never title case, never all caps.
 9. **Real people appear only with permission asked that day.**
+10. **No implied progress.** Added 2026-08-04. Cedrus may state what a member did and what they said they wanted. It may not imply momentum that the record does not support. "You have worked from three new places this month" is allowed if it is true. "You are building great habits" is not, because Cedrus cannot know that.
 
 ### Banned words
 
@@ -323,25 +459,41 @@ Note: "AI powered" is banned as marketing filler. Cedrus still discloses plainly
 2. Does it contain a number without a source? Cut the number.
 3. Would it make someone feel judged? Rewrite it.
 
+**A fourth, added 2026-08-04:** does this imply a date, a venue, or an event that is not confirmed? Cut it.
+
 ---
 
 ## 14. Domains
 
-**Status: LOCKED.**
+**Status: LOCKED, and changed 2026-08-04.**
 
-`cedrus.miami` is owned. The Lovable waitlist page is built and pointed there for the 21 days. After launch, `cedrus.miami` redirects to `cedrus.life`, which stays the product home.
+`cedrus.miami` is the **active** public and beta product surface. It is where the landing page, the join flow, onboarding, Today, and the product shell live.
 
-Keep `cedrus.miami` permanently. It is the best possible domain for the Miami-first positioning and it costs almost nothing to hold.
+`cedrus.life` is **dormant**. It is preserved and untouched. The app at `cedrus-frontend` still serves it and still holds `/terms`, `/privacy`, `/support` and `/sms`, which are registered with Twilio and must keep working. Do not modify, redesign, publish, or reactivate cedrus.life without an explicit decision.
 
-**One practical rule.** Anything printed or hard to change later, including the event QR code, points at `cedrus.life`, never at `cedrus.miami`. Redirects get changed. Printed codes do not.
+**Eventual consolidation of the two domains is LATER and is not decided.** Neither direction is chosen. Do not build anything that assumes one.
+
+**One practical rule, unchanged in spirit and updated in target.** Anything printed or hard to change later points at the domain that will still be there. Because consolidation is undecided, **print nothing** that hard-codes either domain until it is. Redirects get changed. Printed codes do not.
+
+**Prior version, replaced 2026-08-04:** "`cedrus.miami` is owned. The Lovable waitlist page is built and pointed there for the 21 days. After launch, `cedrus.miami` redirects to `cedrus.life`, which stays the product home." The 21 days no longer exist, and the redirect direction is now an open question rather than a settled one.
 
 ---
 
-## 15. Campaigns
+## 15. Campaigns and email
 
-**Status: LOCKED as a plan. Copy below is a draft for approval, not approved copy.**
+**Status: the infrastructure and consent rules below are LOCKED. The event sequence is RETIRED.**
 
 Voice rules in section 13 apply to every word of it.
+
+### Email's new role
+
+Email was carrying event logistics for a workday that is no longer happening. Its new job is smaller and permanent:
+
+1. **Transactional confirmation.** A person joins, and receives one honest email saying what they joined and what happens next. No date, no venue, no seat, no countdown.
+2. **Occasional founder notes.** What Cedrus is building, what changed, what Emil learned. Marketing, so it carries a clear unsubscribe.
+3. **The weekly pace report (LATER).** Section 8. The eventual reason email exists at all.
+
+Email is **not** the product surface and is not on the critical path for the founding release. SMS is the assistant; the web is the home.
 
 ### Email stack
 
@@ -357,140 +509,43 @@ Twilio stays the SMS provider. Resend becomes the email provider. Two vendors, e
 
 **Sending identity: send from a subdomain.** From `Emil from Cedrus <emil@updates.cedrus.life>`, reply-to `emil@cedrus.life`. The subdomain isolates campaign reputation from the mailbox Emil actually reads, and it means the Resend DNS records never touch the root SPF record that Purelymail uses. Replies still land in the normal inbox.
 
+**Open item created by section 14.** The sending identity is on `cedrus.life` while the active product is on `cedrus.miami`. That is a deliverability decision, not just a cosmetic one: `updates.cedrus.life` is the verified, warmed sending domain and moving it is not free. **Do not move it as a side effect of the domain change.** Filed in section 17.
+
 **Non-negotiable setup before the first send.** Verify `updates.cedrus.life` in Resend, which supplies SPF and DKIM, then add a DMARC record. Unauthenticated mail from a new domain lands in spam, and the campaign fails silently while looking like disinterest.
 
 ### List ownership and consent
 
-**Status: LOCKED. These rules exist because this list is a permanent asset, not a one campaign artifact.**
+**Status: LOCKED. Unchanged by the reboot. These rules exist because this list is a permanent asset, not a one campaign artifact.**
 
 1. **Supabase is canonical. Resend is a delivery projection.** Contact and consent data flows Supabase to Resend. Delivery events, bounces, complaints, and unsubscribes flow back from Resend to Supabase through verified webhooks, because only Resend knows them. Supabase contact IDs are the primary keys; no provider ID is ever a primary key. If the provider changes, the list, the consent history, and the suppression state are already ours.
 2. **Record consent at signup:** timestamp, IP address, and the exact wording the person agreed to. This is the defensible record if a complaint ever arrives.
-3. **Separate transactional from marketing, and record email and SMS consent separately.** The signup confirmation is transactional: its primary purpose is confirming the action and delivering event logistics, so it carries a small "manage email preferences" link rather than a prominent unsubscribe. Everything about what Cedrus is building, future workdays, product news, and the weekly brief is marketing and must carry a clear unsubscribe.
+3. **Separate transactional from marketing, and record email and SMS consent separately.** The signup confirmation is transactional: its primary purpose is confirming the action, so it carries a small "manage email preferences" link rather than a prominent unsubscribe. Everything about what Cedrus is building, product news, and the weekly pace report is marketing and must carry a clear unsubscribe.
 
 **SMS consent is a compliance requirement, not a preference.** Twilio requires consent for A2P messaging to be affirmative, separate from general terms, and unchecked by default, with the message type, frequency, message and data rates language, STOP instructions, and links to terms and privacy. Bundled or preselected consent causes campaign rejection, which would take the assistant offline. Email and SMS therefore get two separate checkboxes on the form, and both are recorded as distinct consent events.
-4. **Use Resend's own unsubscribe mechanism.** Do not build a parallel custom one alongside Resend's marketing contacts. Every broadcast carries Resend's unsubscribe link; the resulting webhook updates Supabase. A person who unsubscribes still receives event logistics they explicitly signed up for, and nothing else.
-7. **Every broadcast filters against current Supabase permission state before sending**, not against whatever Resend last knew.
-8. **Export the full contact and consent state periodically**, so a provider outage or account problem is never a data loss event.
+4. **Use Resend's own unsubscribe mechanism.** Do not build a parallel custom one alongside Resend's marketing contacts. Every broadcast carries Resend's unsubscribe link; the resulting webhook updates Supabase.
 5. **Never buy, scrape, or import a list.** Every address arrives because a person typed it into the form.
 6. **Bounces and complaints are suppressed permanently** and never retried. Sending to a hard bounce twice is how domain reputation dies.
+7. **Every broadcast filters against current Supabase permission state before sending**, not against whatever Resend last knew.
+8. **Export the full contact and consent state periodically**, so a provider outage or account problem is never a data loss event.
 
-### The cap is invisible
+**Open compliance gap, found 2026-08-04.** Rule 7 is not currently satisfiable. The unsubscribe path writes a `consent_events` row with `action='withdrawn'` and there is no column anywhere recording current permission state, so "current Supabase permission state" cannot be read, only derived by replaying the event log. There is no broadcast sender today so nothing is being violated, but this must be closed before the first marketing send. See III.3 and section 17.
 
-**Status: LOCKED.** The page never mentions a number. No "50 spots," no counter, no scarcity theater.
+### The Friday insight (KEEP)
 
-The cap only changes which confirmation email a person receives. Signups 1 to 50 get the room. Signup 51 onward gets the list. Nobody is told where the line is, which avoids both a dead counter early and a false-urgency feeling later.
+Friday is the single most common work from home day for hybrid workers. That is a real fact about the customer and it survives the retirement of the Friday workday. It is now a **targeting and timing** insight rather than an event hook: Friday is the day with the most reclaimable time in it, which makes it the best day for a pace card and the best day to acquire.
 
-### The spot is provisional until confirmed
+### Retired: the event sequence
 
-A form submission is not attendance. The first 50 receive a **held place**, not a seat.
+The six email sequence, the held/confirmed/declined/expired seat model, the 50 person cap, the invisible cap rule, the provisional seat rule, the day-14 reminder, the QR check in, and the launch SMS are **all retired** as an active plan.
 
-1. First 50 signups get email 1, which holds a place and asks them to confirm by a stated deadline.
-2. Email 1 carries two buttons: **"I'll be there"** and **"I can't make it."** Neither is an unsubscribe.
-3. Unconfirmed places expire at the deadline and roll to the next person on the list.
-4. Final logistics go only to confirmed attendees.
+They are not deleted from the record. They are preserved in section 22 and in `docs/CEDRUS_REBOOT_PLAN_2026-08-04.md`, because the *mechanism* was sound and will be reusable if a physical activation is ever run again. What made it wrong was that a whole product depended on it.
 
-Registration status moves through: `held → confirmed → declined → expired → attended → no_show`.
+**The cap is invisible** and **no fabricated counts** were the two rules protecting the user in that design. Both survive as general law: the first is folded into section 20 (a pace card never manufactures urgency) and the second is trust law item 3.
 
-No waitlist number is ever shown to anyone. Positions shift constantly as people decline and places expire, and a visible number creates an administrative expectation for no real user benefit.
-
-Reminder to anyone still `held` at day 14.
-
-### Email sequence
-
-| # | When | Subject | Job |
-|---|---|---|---|
-| 1 | On signup | You are in | Confirm, set the date, say what happens |
-| 2 | Day 3 | What Cedrus actually is | Explain places, people, plans without overclaiming |
-| 3 | Day 10 | Where we are meeting on August 21 | Venue, time, who is coming |
-| 4 | Day 18 | Friday, [time], [place] | Logistics, what to bring, the check in |
-| 5 | Morning of | Today | One short note, address, and a phone number to text |
-| 6 | Day after | Thank you, and your Cedrus account | Recap, unlock the assistant, ask one question |
-
-**Email 1, approved shape (version A)**
-
-> **Subject: You are in**
->
-> A better ~~remote~~ day is coming.
->
-> You are on the list for Cedrus Miami. Thank you.
->
-> Here is what you signed up for. On Friday, August 21, a group of us are working from the same room in Miami for the day. Coffee and food are covered. You will meet other people who work remotely here. Founders, freelancers, people building things.
->
-> Between now and then I will send you a few notes. Where it is happening, what Cedrus is building, and what Cedrus can do for your better days.
->
-> **[ I'll be there ]**
->
-> Questions or introductions, just reply. I read everything and am excited to meet.
->
-> Emil
-
-### Capacity
-
-**Status: LOCKED. The event is capped at 50 people. The list is not capped.**
-
-Two different things. Anyone can join the list, forever, because the list is the asset. Only the first 50 get a seat at the August 21 workday.
-
-- Signups 1 through 50 receive email 1 above, with the attendance button.
-- Signup 51 onward receives email 1b instead.
-- Position is signup order. No logic beyond that.
-- The cap is never shown to anyone. See "the cap is invisible" below.
-
-**Email 1b, for signups after the cap**
-
-> **Subject: You are on the list**
->
-> A better ~~remote~~ day is coming.
->
-> The August 21 workday filled up, so you are number [N] in line rather than in the room. If someone drops closer to the day, I will email you first, in order.
->
-> Either way you are on the Cedrus list. I will send you what we are building, and the next workday date as soon as it exists.
->
-> Questions or introductions, just reply. I read everything.
->
-> Emil
-
-### The Friday angle
-
-The workday is Friday on purpose, and it is a marketing asset rather than a scheduling compromise. Friday is the single most common work from home day for hybrid workers, which means a Friday workday reaches both fully remote people and the much larger group who are remote exactly one day a week.
-
-Approved lines to test:
-
-- The most remote day of the week.
-- Four days in. One day with us.
-- Friday is everyone's remote day. Let's use it.
-
-**Email 6, draft**
-
-> **Subject: Thank you, and your Cedrus account**
->
-> Thanks for coming on Friday. [One real, specific line about the day.]
->
-> Cedrus is live now. Your account is at cedrus.life. Set it up, tell it how you like to be talked to, and text it when you want somewhere to work, something to do, or the next workday.
->
-> The next one is [date]. See you there,
-> Emil
-
-### The check in
-
-QR code at the door. It opens a Cedrus URL that marks attendance against the member record. This is the mechanism that makes the validation gate measurable, so it is not optional. Print it pointing at `cedrus.life`.
-
-### Launch SMS
-
-Sent once the assistant is genuinely working, to everyone on the list who gave a phone number.
-
-> A better remote day is coming.
->
-> Hi, I am Cedrus. You signed up for the August 21 workday in Miami. I am up and running now.
->
-> Set up your account at cedrus.life and I can answer questions about the workday, find you somewhere to work, and keep you posted on what is happening.
-
-Account creation plus onboarding unlocks the assistant. The same flow opens on the day of the event, so anyone who walks in can join on the spot.
-
-### Requirement this creates
-
-**Cedrus must be able to read the admin and community calendar** in order to answer questions about upcoming events. This is a founding release requirement, not a later one, because the launch SMS above promises it. It goes into section 6.4 as a fifth job for the assistant.
+**Note for the audit:** the live cedrus.miami page currently violates the invisible cap rule. See III.3.
 
 ---
+
 ## 16. Evidence ledger
 
 Conviction and evidence are different things. This table keeps them separate.
@@ -500,11 +555,15 @@ Conviction and evidence are different things. This table keeps them separate.
 | Remote workers spend substantially more time alone | Externally supported (Science, 2026) |
 | Miami has high remote worker density | Assumed, needs a source before public use |
 | Remote workers want place recommendations by text | Unvalidated |
-| They will attend a recurring Cedrus workday | Unvalidated |
+| ~~They will attend a recurring Cedrus workday~~ | **Retired 2026-08-04.** Not being tested. Was never tested: no venue, no public invitation, one recipient. |
 | Open ended SMS will reveal one or two repeatable jobs | Test hypothesis |
 | Members will want introductions to other members | Unvalidated |
-| Members will pay $15 per month | Unvalidated |
+| Members will pay | Unvalidated. Price not set. |
 | Configurable tone is a differentiator people talk about | Unvalidated |
+| **People will state goals honestly to an assistant they just met** | **Unvalidated.** New 2026-08-04, and it is the reboot's first dependency: the whole product assumes the member tells Cedrus what matters. |
+| **A goal-aware suggestion beats a generic one** | **Unvalidated.** New 2026-08-04. This is the core product claim and nothing yet tests it. |
+| **People will connect a calendar to a two week old product** | **Unvalidated.** New 2026-08-04. This is why Today must work without it. |
+| **People will report back whether something helped** | **Unvalidated.** New 2026-08-04. Progression is unmeasurable without it. |
 
 Anything marked unvalidated may appear in internal planning. It may not appear in public marketing as though it were established.
 
@@ -512,13 +571,206 @@ Anything marked unvalidated may appear in internal planning. It may not appear i
 
 ## 17. Open decisions
 
-Recorded here rather than assumed by whoever touches the file next.
+Recorded here rather than assumed by whoever touches the file next. Items marked NEW are from the 2026-08-04 reboot.
 
 - Which stat leads on the landing page, and whether it appears above or below the fold.
 - The final button copy on the join flow.
-- The venue and exact time for the 21 August workday.
 - Whether the Instagram account launches before or after the landing page goes live.
 - What happens to the existing `/classic` app once founding members are onboarded.
+- **NEW.** The public company line and hero subheadline: candidates A to D in section 13.
+- **NEW.** Whether the goal-aware header enters the test rotation, and against which incumbent.
+- **NEW.** Brand and visual direction. cedrus.miami is dark, DM Sans, glass and orbs. cedrus.life is warm, cream and olive, Cormorant Garamond. These are two different companies visually and one has to win.
+- **NEW.** Which domain is the long term home, and therefore which way the eventual redirect points.
+- **NEW.** Whether the Resend sending identity stays on `updates.cedrus.life` now that the product is on cedrus.miami.
+- **NEW.** Whether SMS identity and web identity are the same account from day one. See the reboot plan section 15.
+- **NEW.** Whether the existing `event_registrations` table and its August 21 rows are migrated, archived, or left in place.
+- **NEW.** Price. Not set, and deliberately not set in this session.
+- ~~The venue and exact time for the 21 August workday.~~ **Closed 2026-08-04, not decided but no longer needed.** There is no committed workday.
+
+---
+
+## 18. Connector doctrine
+
+**Status: LOCKED. New 2026-08-04.**
+
+Connections are inputs. They are not the product. A member who connects nothing must still have a working Cedrus, and a member who connects everything must not have given anything away that Cedrus does not use.
+
+Every connector, without exception:
+
+1. **Explicit authorization.** The member turns it on, knowing what it does. No connection is implied by signup, by another connection, or by continued use.
+2. **Least privilege.** Request the narrowest scope that supports the outcome. If a narrower scope exists and costs a feature, drop the feature first and reconsider.
+3. **Narrow scope.** One authorized purpose per connection, stated in plain language before the member approves it.
+4. **Read-only before write.** No connector gets write access in its first version. Write access is a separate, later, separately justified decision with its own evidence.
+5. **No speculative collection.** Cedrus does not read data because it might be useful later. If no shipped feature consumes it, it is not read.
+6. **No connector because it is technically possible.** A connector earns its place by supporting a demonstrated user outcome, and the outcome comes first.
+7. **Provider policy must permit the exact intended use.** Read the terms for the specific scope, not the general developer policy. A use that a provider forbids is not a use, however technically available.
+8. **No silent cross-purpose reuse.** Data from one service is not reused for an unrelated purpose. A new purpose requires new authorization.
+9. **Sensitive data stays unavailable unless a defined user outcome needs it.** Health, location history, message content, and contact graphs are not read by default.
+10. **Disconnection is one action and is honored immediately.** Stored derived data is deleted or clearly disclosed. A member who disconnects and sees their data still in use has been lied to.
+
+**The test before adding any connector.** Name the user outcome. Name the smallest scope that produces it. Name what breaks if you do not have it. If the answer to the third is "nothing yet," do not build it.
+
+---
+
+## 19. Google Calendar, the first connection
+
+**Status: LOCKED as the first connection. TEST as a hypothesis about demand. New 2026-08-04.**
+
+Calendar is first because time is the constraint that makes every other suggestion real or unreal. Cedrus does not need to know what a member is doing at 2pm. It needs to know that 2pm is not available, and that the 90 minutes after it are.
+
+### Founding scope
+
+- explicit user authorization;
+- least privilege;
+- **read-only**;
+- availability, free/busy, first;
+- no full personal calendar rendered inside Cedrus;
+- no event-description ingestion unless separately justified and separately approved;
+- no attendee harvesting, ever, in any form;
+- no Gmail integration;
+- no autonomous event creation;
+- no autonomous meeting scheduling.
+
+### What Cedrus may conclude from it
+
+That a window is open, that a window is not open, that a day is heavily booked, and that a member's usual free windows do or do not match what they told Cedrus during onboarding. Nothing else.
+
+### What Cedrus may never do with it
+
+Render a calendar. Show it, in any form, to another member. Infer who a member meets. Infer where a member is. Store event titles, descriptions, locations, or attendees. Use it for anything other than placing a suggestion in time.
+
+### Later, separately
+
+**User approved creation of one specific event may be tested as its own piece of work, with its own scope request, its own consent moment, and its own evidence.** It is not in the founding release, and it is not implied by the read-only connection. A member approving each individual event is the only version of this that will ever be considered.
+
+### Boundary that follows from the trust law
+
+Trust law item 9 says exact calendars stay private. The read-only availability scope is the technical expression of that promise, which is why the scope is doctrine and not an implementation detail. **A session that widens the calendar scope has changed a trust promise and needs Emil, not a code review.**
+
+---
+
+## 20. Pace cards
+
+**Status: LOCKED as the definition. TEST as the implementation. New 2026-08-04.**
+
+A pace card is the unit of Cedrus's output and the thing a member actually sees. It is a transparent, bounded recommendation connecting four things:
+
+1. **what the user said matters** (the goal, in their words);
+2. **what has happened** (what Cedrus knows or was told);
+3. **available time** (the window this fits in);
+4. **the next realistic adjustment** (one action, sized to the window).
+
+### The four kinds of statement, and they must be distinguishable
+
+A pace card must make clear, in the card itself, which of these each claim is:
+
+| Kind | Meaning | Example phrasing |
+|---|---|---|
+| **Known fact** | Cedrus has a record of it | "You set a goal to swim twice a week." |
+| **User-reported fact** | The member told Cedrus, unverified | "You said you swam on Tuesday." |
+| **Inferred context** | Cedrus worked it out and could be wrong | "Thursday afternoons usually look open for you." |
+| **Proposed action** | The suggestion | "Want to put a swim in Thursday at 4?" |
+
+Collapsing these is the single most damaging thing a pace card can do, because a confident wrong inference presented as a known fact teaches the member that Cedrus does not know the difference. That is unrecoverable in a product whose whole claim is that it is paying attention.
+
+### Rules
+
+- **Never overstate certainty.** An inference is offered, not asserted. "Usually," "looks like," and "if that is still right" are correct language, not hedging.
+- **One card, one action.** A card proposing three things is a list, and lists get ignored.
+- **Sized to the window.** Do not propose a two hour thing into a 40 minute gap.
+- **Rejectable without friction.** No, not today, and not ever are all first class answers, and all three are signal.
+- **No manufactured urgency.** No countdowns, no scarcity, no "only today." This is the invisible cap rule from section 15, generalized.
+- **No implied progress.** Voice rule 10.
+- **Every card is reviewable.** In the founding release, Emil reviews each one before it is delivered. The review queue is the research instrument.
+
+### What a pace card is not
+
+Not a notification. Not a nudge in the habit-app sense. Not a task. Not a streak. Not a reminder the member set for themselves, which is a different feature that already exists.
+
+---
+
+## 21. Fitness and activity
+
+**Status: LOCKED as a boundary. New 2026-08-04.**
+
+**No direct Strava or fitness-device integration in the founding release.** Activity context is entered manually by the member, in their own words, when it is relevant.
+
+Cedrus may coordinate a member-selected activity goal with the time their day actually has. That is the whole job.
+
+**Cedrus must not make:**
+
+- medical claims;
+- injury assessments;
+- clinical recommendations;
+- recovery prescriptions;
+- training prescriptions inferred from isolated activity data.
+
+**The product distinction, internal.** A fitness app understands a workout. Cedrus understands where that workout fits in the rest of the day. That is a genuinely different job and it is why an integration is not urgent: Cedrus does not need to know a member's heart rate zones to know that they said they wanted to run three times a week and have run once.
+
+**Status of the phrasing: internal only.** It is a clean articulation and it is not approved public copy. If it is wanted publicly it goes through section 13 like anything else.
+
+---
+
+## 22. Part I changelog
+
+Product decisions change. The record of why does not. Append here; never overwrite.
+
+### 2026-08-04, the reboot
+
+**What happened.** The founding release was rebuilt around a connected, goal-aware assistant. The recurring hosted workday was removed as the business engine. The dated launch was replaced with a behavior driven founding test. Google Calendar became the first connection, read-only. Part II was not touched. Part III was corrected only where the current-main audit produced direct evidence.
+
+**Decision: the recurring Cedrus workday is no longer LOCKED.**
+- *Prior:* section 6.5, "One recurring Cedrus workday (LOCKED). Same weekday, same time, same general area. Hosted by Emil. This is the liquidity, manufactured by hand, once a week." Section 3 step 4 made it the engine.
+- *Now:* physical activations are TEST only, and may be one-time, partner-supported, member-led, or demand-triggered. Cedrus must be useful during a week in which Emil hosts nothing.
+- *Why:* the engine required a founder in a room every week. That is not a software business, it does not survive a week when Emil is sick or travelling, and it made every other feature untestable until an event happened. Founder judgment, not new external evidence.
+- *Evidence:* none for or against. The hypothesis "they will attend a recurring Cedrus workday" was never tested. That is precisely the problem: an untested assumption was load bearing.
+
+**Decision: the 21 August 2026 launch is removed.**
+- *Prior:* section 10, "First Cedrus workday: Friday 21 August 2026," with a three week plan built around it.
+- *Now:* section 10 is a four phase behavior driven founding test with no locked date.
+- *Why:* the date was internal and was never a public commitment. The test email went only to Emil, no venue was confirmed, and no money was committed. Removing it breaks no promise to anyone.
+- *Preserved:* the publishing rule that produced this outcome ("the date does not go on the public page until the venue is confirmed. A public countdown is a promise, and a broken one costs the list") was **correct and is kept**, generalized into section 13's fourth shipping question. Note the live page violated it; see III.3.
+
+**Decision: Progression moves from LATER to a founding concept.**
+- *Prior:* section 4, "Progression (LATER) ... For the first 25 members it stays conceptual. The garden does not get built yet."
+- *Now:* Progression is the core claim and ships in a minimal honest form. The garden stays unbuilt.
+- *Why:* the reboot's differentiation *is* progression. Deferring it defers the thing that makes Cedrus not a recommender.
+
+**Decision: the four pillars keep their names and widen their meanings.**
+- *Prior:* Places was "somewhere good to work today." People was "Cedrus workdays, and opt-in members." Plans was "ask Cedrus what to do, who to invite."
+- *Now:* section 4. People no longer leads with workdays. Places is time-aware rather than a lookup.
+- *Why:* two of the four were defined in terms of the retired event.
+
+**Decision: connections enter the canon, Google Calendar first.**
+- *Prior:* section 9 listed "Personal Google Calendar rendering or sync" as NOT NOW, with no connector doctrine at all.
+- *Now:* sections 18 and 19. Calendar *rendering and sync* remain prohibited. Read-only availability is approved. These are not in conflict: the prohibition was on rendering a calendar, and it stands.
+- *Why:* time is the constraint that makes a suggestion real. Without it every recommendation is a guess about whether the member is free.
+
+**Decision: no direct fitness integration.**
+- *Prior:* not addressed.
+- *Now:* section 21. Manual entry only, and a hard boundary against medical, clinical, and training claims.
+- *Why:* the outcome (fitting an activity into a day) does not require the data. Connector doctrine rule 6 applies directly.
+
+**Decision: cedrus.miami is active, cedrus.life is dormant.**
+- *Prior:* section 14, "After launch, `cedrus.miami` redirects to `cedrus.life`, which stays the product home."
+- *Now:* cedrus.miami is the active surface. cedrus.life is preserved and dormant. Consolidation is LATER and undecided.
+- *Why:* the redirect was tied to a launch that no longer exists, and the Miami-first positioning is stronger on the Miami domain.
+- *Unaffected:* `/terms`, `/privacy`, `/support`, `/sms` on cedrus.life stay working. They are registered with Twilio and breaking them breaks compliance verification. This is a Part III preservation law and the reboot does not touch it.
+
+**Decision: the event email sequence is retired, email's role shrinks.**
+- *Prior:* section 15's six email sequence, the 50 seat cap, held/confirmed/declined/expired, the day-14 reminder, the QR check in, the launch SMS.
+- *Now:* transactional confirmation, occasional founder notes, and a LATER weekly pace report.
+- *Why:* every one of them delivered event logistics.
+- *Preserved:* the entire list ownership and consent model (LOCKED, unchanged), the sending identity, the Resend over SendGrid reasoning, and the mechanism itself for reuse if an activation is ever run.
+
+**Decision: no price is set.**
+- *Prior:* "Initial price to test after the gate: $15 per month."
+- *Now:* $15 is the internal starting hypothesis. No price is locked.
+- *Why:* the product being priced changed. Re-locking a price for a different product would be inheriting a number rather than choosing one.
+
+**Language decisions.** Six lines retired, two headers dropped from the test rotation, one new voice rule (no implied progress), one new shipping question (no unconfirmed dates or venues), and the company line and hero subheadline sent back to Emil. Full audit with prior wording in `docs/CEDRUS_REBOOT_PLAN_2026-08-04.md` section 26.
+
+**Operating law unaffected.** Part II was not read for revision and was not edited. Every law, lesson, verified fact, and open flag stands exactly as written. In particular: Law 5 (STOP before push, only Emil pushes), Law 6 (push is deploy in all three repos), Law 7 (`.env.production` is sacred), Law 8 (migrations through the runner), and Law 12 (correct your own record) all govern the implementation work this reboot creates. The trust law in Part I section 7 was strengthened, not relaxed.
 
 ---
 
@@ -947,6 +1199,15 @@ The SMS assistant and its rail. Node, Postgres on Railway.
 - **Untouchable:** `safetyDetection.js`, `safetyFlags.js`, `voiceGuard.js`.
 - **Open:** `BRIEF_DRY_RUN` stays `true` until a named arming session. `DAILY_TOKEN_BUDGET` and `DAILY_SMS_BUDGET` unset on Railway, so the budget guard is deployed but disarmed. The two admin router mounts remain unproven.
 
+**Added 2026-08-04, from the reboot audit of current `main` (`6723c0a`).** Source-read only; nothing was run against prod.
+
+- **There is no calendar or OAuth code anywhere in this repo.** `grep -rniE '\bcalendar\b|oauth|googleapis|google' src/` returns only unrelated hits: a Twilio auth token, two comments about calendar *dates* (`07_persist.js:62`, `memory.js:119`), a "google" verb inside `search.js`'s web-search intent regexes, one brief renderer string, and `chatImport.js:19`'s note that import is file-upload only and "never OAuth." **The Google Calendar connection is greenfield.** No scaffolding to reuse, and none to trip over.
+- **There is no Today surface in this repo.** Today is a frontend concept (`cedrus-frontend/src/lib/cedrus/today.ts`). The backend serves its ingredients (goals, reminders, insights, briefs) and has no Today endpoint. A backend Today or pace-card rail is new work, not a rewiring.
+- **Goals infrastructure is real and is the strongest asset for the reboot.** `services/goals.js` + `routes/api/goals.js` (`/api/goals`) implement user-authored goals, partitioned from the pipeline's inferred weekly intentions by `origin` in **both** directions (`user_set` vs `cedrus_inferred`), plus a pure deterministic `selectVitalFew()` ranking with a 3 to 5 focus band. The founding release's three goal lanes fit this without a schema change.
+- **Onboarding steps already match the new direction.** `onboardingAnswers.js:28` — `work_setup, neighborhood, free_windows, activities, current_groups, people, social_prefs`. `neighborhood`, `free_windows`, `work_setup` and `activities` are exactly the pre-Calendar Today inputs Part I section 6.9 names. Answers land as facts on the user's `is_self` person row via `memory.addFact`, which throws on failure, so a saved step really landed.
+- **Phone identity is stored digits-only here and E.164 on the website.** `users.findOrCreateByPhone` calls `normalizePhone` and stores `17869727469`; `cedrus-miami` stores `phone_e164` as `+17869727469` (`cedrus.functions.ts:38`, `parsePhoneE164` in `cedrus.ts`). **These do not join without normalization.** Any work reconciling a website signup with an SMS user must normalize on one side; do not assume a string match. See the reboot plan section 15.
+- **`app_users` has no location or neighborhood column.** `discovery.js:342` says so in a comment on its default user-location read. Neighborhood currently lives only as an onboarding fact. Places work that assumes a structured location field is assuming a column that is not there.
+
 ## III.2. `cedrus-frontend`
 
 The main web app at cedrus.life. The pre-pivot experience lives intact at `/classic`.
@@ -956,6 +1217,13 @@ The main web app at cedrus.life. The pre-pivot experience lives intact at `/clas
 - **Tests:** `npm run typecheck`, `npm run lint`, `npm run test`, `npm run build`.
 - **Lint baseline:** roughly 103 pre-existing prettier errors. Report the delta only.
 - **Note:** `routeTree.gen.ts` is generated. Regenerate it, never hand-edit.
+
+**Added 2026-08-04, from the reboot audit (`63e1fde`). Read-only; this repo was not modified.**
+
+- **This repo and `cedrus-miami` are two different visual identities, not two skins of one.** Here: `src/styles.css` `:root` is warm and light, olive/brown/cream raws (`--brand-olive #737f45`, `--brand-cream #f2efe6`), display face Cormorant Garamond with Nunito Sans body, plus a second `--v1-*` token set using Fraunces and a full motion vocabulary (`v1-arrive`, `v1-stagger`, `v1-scene`, `v1-grow-in`). In `cedrus-miami`: near-black `oklch(0.07 0 0)`, DM Sans throughout, glass cards, shimmer and floating orbs. **Neither is wrong; they cannot both be Cedrus.** Filed as an open decision in Part I section 17.
+- **Reusable without the retired product attached:** the `--v1-*` token set and motion primitives, `components/v1/` (`V1Shell`, `WindowChip`, `ui.tsx`), and the `CdSection` pattern behind `components/cedrus/TodaySections.tsx` (titled section, first-class `empty` state, optional `accent`). The empty-state-as-a-prop convention is worth carrying over: a Today that is honestly empty is a requirement of Part I section 6.9, not an edge case.
+- **Belongs to the retired direction:** `components/v1/screens/Garden.tsx`, `Seedling.tsx`, `TreeGlyph.tsx` and the friendship-stage vocabulary; the ring / Dunbar-tier selector (cosmetic, see II.5); and the relationship-CRM framing of `people.tsx` and `PersonProfile.tsx`. Do not port these forward as the wedge.
+- **Preservation law is unchanged by the reboot.** `/classic`, `/terms`, `/privacy`, `/support`, `/sms` all stay. cedrus.life being dormant (Part I section 14) means *do not develop it*; it does not mean let it break.
 
 ## III.3. `cedrus-miami`
 
@@ -984,12 +1252,28 @@ Three tables: `contacts`, `consent_events`, `event_registrations`. All RLS-enabl
 
 ### Known open bugs
 
-1. **No transaction.** The contact insert, both consent inserts, and the registration RPC are independent round-trips. An RPC failure leaves an orphan contact, and that person is then told "already on the list" forever with no seat.
-2. **Consent inserts are unchecked.** The return value is never read, so a failure is silently ignored. This is the compliance record, so it is the worst place for a silent failure.
-3. **`consent_events` has no `created_at` column.**
-4. **`position` is a Postgres reserved word.** It threw a syntax error once during migration work. Quote it everywhere.
-5. **Three files still read `process.env`:** `client.server.ts`, `auth-middleware.ts`, `resend-webhook.ts`. The webhook one matters as soon as broadcasts start.
-6. **Something still probes for a `waitlist` table** that no longer exists, producing 404s.
+**All six re-audited against current `main` (`6e07832`) on 2026-08-04, by reading source only.** No prod query was run, so per Lesson 2 nothing below is evidence about the live database. Nothing was closed.
+
+1. **No transaction. STILL OPEN, confirmed.** `src/lib/cedrus.functions.ts` `submitCedrusSignup` does four independent round-trips: duplicate check (`:61`), contact insert (`:75`), consent insert (`:94`), registration RPC (`:115`). An RPC failure leaves an orphan contact, and that person is then told "already on the list" forever with no seat. Unchanged since the flag was filed.
+2. **Consent inserts are unchecked. STILL OPEN, confirmed, and there are two sites not one.** `cedrus.functions.ts:94` (`await supabase.from("consent_events").insert([...])`) and `:245` (the withdrawal write in `updateEmailPreference`) both discard the result. `supabase-js` resolves `{ data, error }` rather than throwing (Lesson 11), so a failed compliance write produces no exception, no log, and a successful-looking response. This is the compliance record, so it is the worst place in the codebase for a silent failure.
+3. **`consent_events` has no `created_at` column. REWORDED 2026-08-04, not closed.** The authored schema declares **`occurred_at timestamptz NOT NULL DEFAULT now()`** (`supabase/migrations/20260731003901_*.sql`), so the consent record is not undated, which is what this flag implied. The real issue is narrower: the column is named `occurred_at`, and any code or export written against `created_at` will fail or silently read nothing. **Migration files are not evidence about prod (Lesson 2)** — settle prod with `SELECT to_regclass` / a column read before relying on either name.
+4. **`position` is a Postgres reserved word. STILL OPEN, and it is currently unquoted.** Both versions of `create_cedrus_registration` use bare `MAX(position)` and a bare `position` in the INSERT column list (`20260731003901_*.sql`, `20260731105004_registration_position_race.sql`). It parses today in these positions; it threw once already during migration work. Quote it everywhere.
+5. **Three files still read `process.env`. STILL OPEN, and they are not equally dangerous.** Confirmed by `grep -rn "process\.env" src/`:
+   - `src/routes/api/public/resend-webhook.ts:8` — **this is the live one.** It is a real mounted route, and Worker bindings are not on `process.env` (Lesson 15), so `RESEND_WEBHOOK_SECRET` reads `undefined` in production. The handler then logs a warning and **returns HTTP 200**, so Resend sees success and every delivery, bounce, and complaint event is silently discarded. That is Lesson 1's exact shape, and it breaks the "Resend events flow back to Supabase" half of the consent model the moment broadcasts start.
+   - `src/integrations/supabase/client.server.ts:33-34` and `src/integrations/supabase/auth-middleware.ts:36-37` — both are Lovable-generated ("do not edit directly") and both have **zero importers anywhere in `src/`**. They are dead code today. `client.server.ts` also reads `SUPABASE_SERVICE_ROLE_KEY`, the name Lovable will not inject (Lesson 14), so if anything ever did import it it would fail twice over. The live signup path does not use it: it uses `createServiceClient()` in `src/lib/cedrus.server.ts`, which correctly goes through `getEnv()` and reads `CEDRUS_SERVICE_ROLE_KEY` first.
+6. **Something still probes for a `waitlist` table. UNRESOLVED — no code evidence found, and NOT closed.** A full search of `src/` and `supabase/` finds no query, RPC, or type referencing a `waitlist` table. The only hits are a `contacts.source` column default of `'waitlist_page'`, component names (`WaitlistForm`, `WaitlistCounter`), and prose. **Absence from the code is not proof the 404s stopped** (Lesson 3: what result would I see if this were still happening?) — the probe could come from the Supabase client's schema cache, a Lovable-injected integration, or a stale generated type. Settle it with a network trace on a real page load or the Supabase API logs, not another grep.
+
+### Further findings from the 2026-08-04 reboot audit
+
+Source-read only, current `main` (`6e07832`).
+
+7. **The live page violates the invisible-cap rule (Part I section 15).** `src/components/WaitlistCounter.tsx` polls `getHeldRegistrationCount()` every 30 seconds and renders "**N** seats held". The rule is explicit: "The page never mentions a number. No '50 spots,' no counter, no scarcity theater." The count is real, so trust law item 3 (no fabricated counts) is not breached, but the doctrine is. The reboot retires the seat model entirely, which removes this.
+8. **The live page runs a public countdown to an unconfirmed event.** `src/components/CountdownTimer.tsx` counts down to `config.eventDate = "2026-08-21T11:00:00"`. Part I section 10's publishing rule was "the date does not go on the public page until the venue is confirmed. A public countdown is a promise, and a broken one costs the list." The venue was never confirmed. **The rule was right and it was shipped past.** Worth recording as an incident, not just a task.
+9. **August 21 is hard-coded in six places**, three of them in the database rather than the code: `config.ts:eventDate`; `cedrus.functions.ts:118` (`_event_date: "2026-08-21"`); `cedrus.functions.ts:266` (the count filter); `index.tsx:50` (JSON-LD `Event.startDate`, which publishes the date to search engines); the `event_registrations.event_date` column **default**; and the `create_cedrus_registration(_event_date date DEFAULT '2026-08-21')` argument default. Removing the date from the page does not remove it from the schema.
+10. **Unsubscribe is recorded but not enforced.** `updateEmailPreference` writes a `consent_events` row with `action='withdrawn'` and nothing else. `contacts` has no permission-state column (`id, full_name, email_normalized, phone_e164, source, created_at`), so current permission cannot be read, only reconstructed by replaying the event log. Harmless today because no broadcast sender exists. **It must be closed before the first marketing send** or rule 7 of the consent model (filter against current Supabase permission state) is unsatisfiable. See Part I section 15.
+11. **Over-cap signups are written as `status='expired'`.** The RPC assigns `held` for positions 1 to 50 and `expired` for 51 onward, so someone who never had a place is stored in the state meaning "had a place, lost it," colliding with the documented lifecycle `held → confirmed → declined → expired → attended → no_show`. Any analysis of the existing rows must account for this.
+12. **The position race was fixed and the fix is real.** `20260731105004_registration_position_race.sql` adds `pg_advisory_xact_lock(hashtext(_event_date::text))` inside the RPC plus a `UNIQUE (event_date, position)` backstop. Recorded because the earlier read-then-insert shape is the kind of thing that gets re-flagged.
+13. **`getHeldRegistrationCount` is an unauthenticated server function** returning a live count of held registrations. It exists only to feed the counter in finding 7 and should go with it.
 
 ## III.4. External services
 
