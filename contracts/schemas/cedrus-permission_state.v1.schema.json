@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.cedrus.life/v0/cedrus-permission_state.v1.schema.json",
+  "title": "Permission state",
+  "description": "Current send permission, computed from consent events. Every broadcast filters against this, never against what a provider last knew.",
+  "x-cedrus-contract": "cedrus.permission_state",
+  "x-cedrus-version": 1,
+  "x-cedrus-sources": [
+    "CEDRUS.md I.15 rules 1, 6, 7",
+    "reboot plan §22"
+  ],
+  "x-cedrus-fully-expressed": true,
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "contact_ref": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "The acquisition record."
+    },
+    "email_marketing": {
+      "type": "boolean"
+    },
+    "sms_assistant": {
+      "type": "boolean"
+    },
+    "suppressed": {
+      "type": "boolean"
+    },
+    "suppression_reason": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "hard_bounce",
+            "complaint",
+            "manual"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "derived_from_consent_ids": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 96,
+          "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "description": "The latest consent event this state was derived from."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "computed_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+      "format": "date-time",
+      "description": "When this projection was computed."
+    }
+  },
+  "required": [
+    "schema_version",
+    "contact_ref",
+    "email_marketing",
+    "sms_assistant",
+    "suppressed",
+    "suppression_reason",
+    "derived_from_consent_ids",
+    "computed_at"
+  ],
+  "additionalProperties": false
+}

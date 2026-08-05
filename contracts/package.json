@@ -1,0 +1,28 @@
+{
+  "name": "@cedrus/contracts",
+  "version": "0.1.0",
+  "description": "Cedrus Contracts v0, VENDORED into cedrus-backend. Versioned product contracts, validators, JSON Schemas and guards. Provenance and the amendments applied to this copy are in VENDORED_FROM.md.",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "check": "npm run typecheck && npm run test",
+    "schemas": "node scripts/generate-json-schemas.ts",
+    "mutate": "node tools/mutate.mjs",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "typescript": "^5.6.3"
+  }
+}

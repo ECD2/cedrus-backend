@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.cedrus.life/v0/cedrus-availability.v1.schema.json",
+  "title": "Availability",
+  "description": "Open windows for one day, labelled with whether they came from stated usual windows or from a live calendar projection.",
+  "x-cedrus-contract": "cedrus.availability",
+  "x-cedrus-version": 1,
+  "x-cedrus-sources": [
+    "reboot plan §11",
+    "reboot plan §12",
+    "CEDRUS.md II.4 lesson 7"
+  ],
+  "x-cedrus-fully-expressed": false,
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "member_id": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Canonical member id, `app_users` is canonical (reboot plan §15)."
+    },
+    "date": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+      "format": "date-time",
+      "description": "The day this availability describes, at local midnight in UTC."
+    },
+    "basis": {
+      "type": "string",
+      "enum": [
+        "stated",
+        "calendar"
+      ]
+    },
+    "open_windows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "starts_at": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+            "format": "date-time",
+            "description": "Open from."
+          },
+          "ends_at": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+            "format": "date-time",
+            "description": "Open until."
+          }
+        },
+        "required": [
+          "starts_at",
+          "ends_at"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 24
+    },
+    "fallback_notice": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "using_your_usual_windows",
+            "calendar_disconnected",
+            "calendar_stale"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "computed_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+      "format": "date-time",
+      "description": "When this was computed."
+    }
+  },
+  "required": [
+    "schema_version",
+    "member_id",
+    "date",
+    "basis",
+    "open_windows",
+    "fallback_notice",
+    "computed_at"
+  ],
+  "additionalProperties": false
+}

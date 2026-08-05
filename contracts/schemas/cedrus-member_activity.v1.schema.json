@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.cedrus.life/v0/cedrus-member_activity.v1.schema.json",
+  "title": "Member activity",
+  "description": "A manual activity report not tied to a card. Typed in, never integrated, never verified.",
+  "x-cedrus-contract": "cedrus.member_activity",
+  "x-cedrus-version": 1,
+  "x-cedrus-sources": [
+    "reboot plan §13",
+    "reboot plan §19"
+  ],
+  "x-cedrus-fully-expressed": true,
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "activity_id": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Activity id."
+    },
+    "member_id": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Canonical member id, `app_users` is canonical (reboot plan §15)."
+    },
+    "goal_ref": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 96,
+          "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "description": "The goal it relates to, if the member said."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "description": "What happened, in the member's words."
+    },
+    "happened_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+      "format": "date-time",
+      "description": "When it happened, as reported."
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "tap",
+        "sms",
+        "operator_entered"
+      ]
+    },
+    "entry_method": {
+      "const": "typed"
+    },
+    "verified": {
+      "const": false
+    },
+    "recorded_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+      "format": "date-time",
+      "description": "When it was recorded."
+    }
+  },
+  "required": [
+    "schema_version",
+    "activity_id",
+    "member_id",
+    "goal_ref",
+    "text",
+    "happened_at",
+    "source",
+    "entry_method",
+    "verified",
+    "recorded_at"
+  ],
+  "additionalProperties": false
+}

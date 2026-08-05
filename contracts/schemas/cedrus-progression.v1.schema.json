@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.cedrus.life/v0/cedrus-progression.v1.schema.json",
+  "title": "Progression",
+  "description": "Per goal: suggestions, outcomes and confirmed help, each counted from cited records. No score, no streak, and allowed to say nothing moved.",
+  "x-cedrus-contract": "cedrus.progression",
+  "x-cedrus-version": 1,
+  "x-cedrus-sources": [
+    "CEDRUS.md I.4 Progression",
+    "CEDRUS.md I.7.3",
+    "reboot plan §7",
+    "reboot plan §10 /progress",
+    "reboot plan §19"
+  ],
+  "x-cedrus-fully-expressed": false,
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "member_id": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Canonical member id, `app_users` is canonical (reboot plan §15)."
+    },
+    "window": {
+      "type": "object",
+      "properties": {
+        "starts_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+          "format": "date-time",
+          "description": "From."
+        },
+        "ends_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+          "format": "date-time",
+          "description": "Until."
+        }
+      },
+      "required": [
+        "starts_at",
+        "ends_at"
+      ],
+      "additionalProperties": false
+    },
+    "lines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "goal_ref": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 96,
+            "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+            "description": "The goal."
+          },
+          "goal_stated_text": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 200,
+            "description": "Quoted back in the member's words."
+          },
+          "lane": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "work",
+                  "people",
+                  "body"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cards_suggested": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "The number shown to a member."
+              },
+              "basis": {
+                "type": "string",
+                "enum": [
+                  "observed_rows",
+                  "operator_verified"
+                ]
+              },
+              "source_refs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 5,
+                  "maxLength": 96,
+                  "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                  "description": "Record this count was derived from."
+                }
+              }
+            },
+            "required": [
+              "value",
+              "basis",
+              "source_refs"
+            ],
+            "additionalProperties": false
+          },
+          "outcomes_recorded": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "The number shown to a member."
+              },
+              "basis": {
+                "type": "string",
+                "enum": [
+                  "observed_rows",
+                  "operator_verified"
+                ]
+              },
+              "source_refs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 5,
+                  "maxLength": 96,
+                  "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                  "description": "Record this count was derived from."
+                }
+              }
+            },
+            "required": [
+              "value",
+              "basis",
+              "source_refs"
+            ],
+            "additionalProperties": false
+          },
+          "confirmed_helped": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "The number shown to a member."
+              },
+              "basis": {
+                "type": "string",
+                "enum": [
+                  "observed_rows",
+                  "operator_verified"
+                ]
+              },
+              "source_refs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 5,
+                  "maxLength": 96,
+                  "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                  "description": "Record this count was derived from."
+                }
+              }
+            },
+            "required": [
+              "value",
+              "basis",
+              "source_refs"
+            ],
+            "additionalProperties": false
+          },
+          "summary_text": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300
+          }
+        },
+        "required": [
+          "goal_ref",
+          "goal_stated_text",
+          "lane",
+          "cards_suggested",
+          "outcomes_recorded",
+          "confirmed_helped",
+          "summary_text"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 3
+    },
+    "nothing_moved": {
+      "type": "boolean"
+    },
+    "computed_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+      "format": "date-time",
+      "description": "When it was computed."
+    }
+  },
+  "required": [
+    "schema_version",
+    "member_id",
+    "window",
+    "lines",
+    "nothing_moved",
+    "computed_at"
+  ],
+  "additionalProperties": false
+}

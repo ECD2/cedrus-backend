@@ -165,8 +165,12 @@ run_js "$(bundle test/reliability-core.js src/services/entitlements.js src/servi
 
 # ── Bundle 19: user-set goals — pure vital-few selection + store/read layer ──
 # time.js is included because goals.js stamps week_of via localWeekOf/mondayOf.
+# stub-contract-guard.js is included because goals.js imports assertGoalContract
+# and the strip removes the import line; the real guard needs the compiled
+# contracts package and a logger, neither of which reliability-core.js provides.
+# The real guard is proven in test/contracts-goals.test.mjs (run-all.sh).
 section "user-set goals"
-run_js "$(bundle test/reliability-core.js src/utils/time.js src/services/goals.js test/goals.test.js)"
+run_js "$(bundle test/reliability-core.js test/stub-contract-guard.js src/utils/time.js src/services/goals.js test/goals.test.js)"
 
 # ── Bundle 20: §6 suppression read — abnormal branches announce themselves ──
 # The FIRST suite to run the real src/services/safetyFlags.js (every other suite

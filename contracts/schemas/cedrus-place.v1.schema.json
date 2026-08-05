@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.cedrus.life/v0/cedrus-place.v1.schema.json",
+  "title": "Place",
+  "description": "An operator-curated Miami place. Quality over coverage; not a scraped directory.",
+  "x-cedrus-contract": "cedrus.place",
+  "x-cedrus-version": 1,
+  "x-cedrus-sources": [
+    "CEDRUS.md I.4 Places",
+    "reboot plan §7 Places"
+  ],
+  "x-cedrus-fully-expressed": true,
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "place_id": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Place id."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "neighborhood": {
+      "type": "string",
+      "enum": [
+        "brickell",
+        "wynwood",
+        "little_havana",
+        "edgewater",
+        "coconut_grove",
+        "downtown",
+        "miami_beach",
+        "coral_gables",
+        "design_district",
+        "key_biscayne",
+        "other_miami_dade"
+      ]
+    },
+    "origin": {
+      "const": "operator_curated"
+    },
+    "suitable_for": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "calls",
+          "deep_work",
+          "either"
+        ]
+      },
+      "minItems": 1,
+      "maxItems": 3
+    },
+    "typical_hours": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "weekday": {
+            "type": "string",
+            "enum": [
+              "monday",
+              "tuesday",
+              "wednesday",
+              "thursday",
+              "friday",
+              "saturday",
+              "sunday"
+            ]
+          },
+          "opens_at_local": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "description": "Opens."
+          },
+          "closes_at_local": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "description": "Closes."
+          }
+        },
+        "required": [
+          "weekday",
+          "opens_at_local",
+          "closes_at_local"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 7
+    },
+    "operator_note": {
+      "type": "string",
+      "maxLength": 300,
+      "description": "Why Emil would send someone here."
+    },
+    "curated_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+      "format": "date-time",
+      "description": "When an operator last checked it."
+    }
+  },
+  "required": [
+    "schema_version",
+    "place_id",
+    "name",
+    "neighborhood",
+    "origin",
+    "suitable_for",
+    "typical_hours",
+    "curated_at"
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.cedrus.life/v0/cedrus-voice_preference.v1.schema.json",
+  "title": "Voice preference",
+  "description": "How Cedrus talks to a member. Presets now, free form as the destination. Safety and compliance registers are outside its reach.",
+  "x-cedrus-contract": "cedrus.voice_preference",
+  "x-cedrus-version": 1,
+  "x-cedrus-sources": [
+    "CEDRUS.md I.6.4",
+    "CEDRUS.md I.10 week 2"
+  ],
+  "x-cedrus-fully-expressed": true,
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "member_id": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 96,
+          "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "description": "Canonical member id, `app_users` is canonical (reboot plan §15)."
+        },
+        "mode": {
+          "const": "preset"
+        },
+        "preset": {
+          "type": "string",
+          "enum": [
+            "casual",
+            "direct",
+            "warm"
+          ]
+        },
+        "applies_to": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "assistant_replies",
+              "pace_cards",
+              "nudges"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 3,
+          "description": "Registers the tone applies to. Safety and compliance registers are not members of this set."
+        },
+        "safety_register_fixed": {
+          "const": true
+        },
+        "updated_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+          "format": "date-time",
+          "description": "Updated."
+        }
+      },
+      "required": [
+        "schema_version",
+        "member_id",
+        "mode",
+        "preset",
+        "applies_to",
+        "safety_register_fixed",
+        "updated_at"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "member_id": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 96,
+          "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "description": "Canonical member id, `app_users` is canonical (reboot plan §15)."
+        },
+        "mode": {
+          "const": "free_form"
+        },
+        "instruction_text": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 300,
+          "description": "How to talk to me, in the member's words."
+        },
+        "applies_to": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "assistant_replies",
+              "pace_cards",
+              "nudges"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 3,
+          "description": "Registers the tone applies to. Safety and compliance registers are not members of this set."
+        },
+        "safety_register_fixed": {
+          "const": true
+        },
+        "updated_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+          "format": "date-time",
+          "description": "Updated."
+        }
+      },
+      "required": [
+        "schema_version",
+        "member_id",
+        "mode",
+        "instruction_text",
+        "applies_to",
+        "safety_register_fixed",
+        "updated_at"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

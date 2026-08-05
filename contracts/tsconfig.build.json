@@ -1,0 +1,25 @@
+{
+  "//": [
+    "Emit config for the VENDORED copy. The lab has no build step: it runs its .ts",
+    "sources directly under Node 24 type stripping. cedrus-backend cannot rely on",
+    "that (package.json declares node >=20, and a type-stripping floor is a",
+    "deploy-time failure mode, not a test-time one), so the vendored copy is",
+    "compiled to plain ES2023 JavaScript at vendor time and the backend imports",
+    "dist/. See VENDORED_FROM.md for the decision and what it costs.",
+    "",
+    "rewriteRelativeImportExtensions rewrites the sources' .ts specifiers to .js in",
+    "the emitted output, so the source stays byte-comparable with the lab."
+  ],
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": true,
+    "declarationMap": false,
+    "sourceMap": false,
+    "removeComments": false,
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src/**/*.ts"]
+}

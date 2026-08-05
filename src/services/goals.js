@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase.js';
 import { mondayOf, localWeekOf } from '../utils/time.js';
+import { assertGoalContract } from './contractGuard.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // USER-SET GOALS (INFRA-15) — the standing, user-authored goals surface.
@@ -250,6 +251,25 @@ export async function addGoal({ user, body } = {}, deps = {}) {
   if (extra.length) throw httpError(422, 'invalid_request', MSG_SERVER_FIELDS);
 
   const goalText = cleanGoalText(body.goal_text);
+
+  // CONTRACT CHECK (Slice 1 Phase B). Runs immediately after cleanGoalText, so
+  // it sees the text exactly as it will be stored, and BEFORE the write, so
+  // that enforcing it can actually refuse. `CONTRACTS_VALIDATE` decides the
+  // cost: unset (the shipped default) logs a `contract.violation` and returns,
+  // changing nothing; 'true' throws a typed 422. See services/contractGuard.js.
+  //
+  // This is the only place the vendored contracts package touches a live path.
+  // It validates; it never rewrites. If the contract and this service disagree,
+  // that is a fact to record, not a licence to change what gets stored.
+  assertGoalContract({
+    user_id: user.id,
+    goal_text: goalText,
+    origin: GOAL_ORIGIN,
+    status: STATUS_ACTIVE,
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  }, { requestId: deps.requestId });
+
   const priority = cleanPriority(body.priority);
   const dueAt = cleanDueAt(body.due_at);
   const personId = await cleanPersonId(db, user.id, body.person_id);

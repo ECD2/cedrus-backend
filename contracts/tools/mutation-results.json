@@ -1,0 +1,500 @@
+{
+  "generated_at": "2026-08-05T14:17:17.959Z",
+  "baseline_exit_code": 0,
+  "baseline_pass_count": 97,
+  "mutations_run": 30,
+  "controlled": 30,
+  "uncontrolled": 0,
+  "results": [
+    {
+      "id": "M01",
+      "guard": "provenance: known-source allowlist",
+      "doctrine": "An inference may not be presented as a known fact (reboot plan §12, §13, §27 risk 12).",
+      "file": "src/guards/provenance.ts",
+      "mutation": "export const KNOWN_SOURCE_TYPES = ['calendar_freebusy', 'member_stated', 'operator_entered', 'system_record'] as const;  ->  export const KNOWN_SOURCE_TYPES = ['calendar_freebusy', 'member_stated', 'operator_entered', 'system_record', 'model_inference', 'member_sms'] as const;",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares",
+        "parse throws a ContractViolation carrying every issue",
+        "a known statement may not cite an inference source",
+        "a known statement may not cite a self-report",
+        "the schemas on disk match what the generator would write",
+        "counterexamples: the validator always rejects, and the JSON Schema verdict matches what is recorded"
+      ],
+      "mutated_fail_count": 6,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M02",
+      "guard": "provenance: hedge language in a known statement",
+      "doctrine": "The label can be right while the sentence lies.",
+      "file": "src/guards/provenance.ts",
+      "mutation": "export const HEDGE_MARKERS = [  ->  export const HEDGE_MARKERS = [",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares",
+        "hedge language in a known statement is rejected, in any casing",
+        "the schemas on disk match what the generator would write",
+        "counterexamples: the validator always rejects, and the JSON Schema verdict matches what is recorded"
+      ],
+      "mutated_fail_count": 4,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M03",
+      "guard": "provenance: certainty language in an inferred statement",
+      "doctrine": "The mirror rule. An inference asserting certainty is the same failure.",
+      "file": "src/guards/provenance.ts",
+      "mutation": "export const CERTAINTY_MARKERS = [  ->  export const CERTAINTY_MARKERS = [",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares",
+        "certainty language in an inferred statement is rejected",
+        "the schemas on disk match what the generator would write",
+        "counterexamples: the validator always rejects, and the JSON Schema verdict matches what is recorded"
+      ],
+      "mutated_fail_count": 4,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M04",
+      "guard": "provenance: no laundering through derived_from",
+      "doctrine": "A known statement may not be derived from an inferred or user-reported one.",
+      "file": "src/guards/provenance.ts",
+      "mutation": "      if (parentKind === 'inferred' || parentKind === 'user_reported') {  ->        if (false) {",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares",
+        "a known statement may not be derived from a softer one",
+        "counterexamples: the validator always rejects, and the JSON Schema verdict matches what is recorded"
+      ],
+      "mutated_fail_count": 3,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M05",
+      "guard": "authorization: scope allowlist",
+      "doctrine": "Request the narrowest scope that returns free/busy and no more (reboot plan §16).",
+      "file": "src/guards/authorization.ts",
+      "mutation": "export const ALLOWED_SCOPES = ['calendar.freebusy.read'] as const;  ->  export const ALLOWED_SCOPES = ['calendar.freebusy.read', 'calendar.events.read', 'calendar.readonly', 'https://www.googleapis.com/auth/calendar'] as const;",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares",
+        "scopes wider than free/busy are rejected",
+        "the schemas on disk match what the generator would write"
+      ],
+      "mutated_fail_count": 3,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M06",
+      "guard": "authorization: named outcome must not be vague",
+      "doctrine": "An outcome that could be printed on any consent screen is not a named outcome.",
+      "file": "src/guards/authorization.ts",
+      "mutation": "export const VAGUE_OUTCOME_PHRASES = [  ->  export const VAGUE_OUTCOME_PHRASES = [",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares",
+        "an unnamed or vague outcome is rejected",
+        "the schemas on disk match what the generator would write",
+        "counterexamples: the validator always rejects, and the JSON Schema verdict matches what is recorded"
+      ],
+      "mutated_fail_count": 4,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M07",
+      "guard": "authorization: every scope justified by the declared purpose",
+      "doctrine": "Nothing is collected without a shipped feature consuming it (reboot plan §18).",
+      "file": "src/guards/authorization.ts",
+      "mutation": "    if (!justified.includes(scope as AllowedScope)) {  ->      if (false) {",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "a scope the declared purpose does not consume is rejected"
+      ],
+      "mutated_fail_count": 1,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M08",
+      "guard": "calendar: forbidden field list",
+      "doctrine": "Never store, never request, never log titles, descriptions, locations, attendees (reboot plan §17).",
+      "file": "src/guards/calendar-boundary.ts",
+      "mutation": "export const FORBIDDEN_CALENDAR_FIELDS = [  ->  export const FORBIDDEN_CALENDAR_FIELDS = [",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "the calendar guard normalises casing, separators and provider prefixes",
+        "every field named in reboot plan §17 is on the forbidden list"
+      ],
+      "mutated_fail_count": 2,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M09",
+      "guard": "calendar: fetch-boundary assertion throws",
+      "doctrine": "The enforcement point is the fetch, not the render.",
+      "file": "src/guards/calendar-boundary.ts",
+      "mutation": "  if (issues.length > 0) throw new CalendarBoundaryViolation(issues);  ->    if (issues.length > 999) throw new CalendarBoundaryViolation(issues);",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "assertNoCalendarContent throws at the fetch boundary"
+      ],
+      "mutated_fail_count": 1,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M10",
+      "guard": "objects are closed to unknown keys",
+      "doctrine": "An unknown key on a calendar payload is how a title reaches the logs.",
+      "file": "src/schema/core.ts",
+      "mutation": "          issues.push(issue(join(path, key), 'object/unknown_key', `unknown field \"${key}\" is not permitted`));  ->            void key;",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "amendment 3: the old field name is refused rather than ignored",
+        "an error body carrying a phone number is rejected",
+        "objects are closed: an unknown key is a rejection, not a warning",
+        "every counterexample is rejected with the code it declares"
+      ],
+      "mutated_fail_count": 4,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M11",
+      "guard": "fabrication: a count must equal the records it cites",
+      "doctrine": "No fabricated activity counts, ever. If three people are going, it says three (CEDRUS.md I.7.3).",
+      "file": "src/guards/fabrication.ts",
+      "mutation": "  if (count.value !== count.source_refs.length) {  ->    if (false) {",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares",
+        "a count must name every record it counted",
+        "counterexamples: the validator always rejects, and the JSON Schema verdict matches what is recorded"
+      ],
+      "mutated_fail_count": 3,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M12",
+      "guard": "fabrication: no scores, streaks or engagement metrics",
+      "doctrine": "An inferred score is a fabricated count wearing a chart (reboot plan §13, §19).",
+      "file": "src/guards/fabrication.ts",
+      "mutation": "export const FORBIDDEN_PROGRESS_FIELDS = [  ->  export const FORBIDDEN_PROGRESS_FIELDS = [",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "scores, streaks and engagement metrics are rejected at any depth"
+      ],
+      "mutated_fail_count": 1,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M13",
+      "guard": "fabrication: a person may not be invented",
+      "doctrine": "A person exists because the member or an operator said so.",
+      "file": "src/guards/fabrication.ts",
+      "mutation": "export const PERSON_ORIGINS = ['member_stated', 'operator_entered'] as const;  ->  export const PERSON_ORIGINS = ['member_stated', 'operator_entered', 'model_inference', 'generated'] as const;",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares",
+        "a person may not originate from a model",
+        "the schemas on disk match what the generator would write",
+        "counterexamples: the validator always rejects, and the JSON Schema verdict matches what is recorded"
+      ],
+      "mutated_fail_count": 4,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M14",
+      "guard": "fabrication: no contact disclosure in a projection",
+      "doctrine": "Phone numbers are not revealed before both people consent, per introduction (CEDRUS.md I.7.5).",
+      "file": "src/guards/fabrication.ts",
+      "mutation": "export const FORBIDDEN_CONTACT_FIELDS = [  ->  export const FORBIDDEN_CONTACT_FIELDS = [",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "contact details are rejected wherever they appear"
+      ],
+      "mutated_fail_count": 1,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M15",
+      "guard": "Today: stated timing may not be presented as known",
+      "doctrine": "\"Usually open\" becomes \"open\" only with a calendar, and the label changes with it (reboot plan §12).",
+      "file": "src/contracts/today.ts",
+      "mutation": "    if (today.timing_basis === 'stated' && today.day_line.kind !== 'inferred') {  ->      if (false) {",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares",
+        "counterexamples: the validator always rejects, and the JSON Schema verdict matches what is recorded"
+      ],
+      "mutated_fail_count": 2,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M16",
+      "guard": "Today: a fallback is announced, never silent",
+      "doctrine": "It does not silently start guessing while looking certain (reboot plan §12, Lesson 7).",
+      "file": "src/contracts/today.ts",
+      "mutation": "    if (needsNotice && today.fallback_notice === null) {  ->      if (false) {",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares",
+        "counterexamples: the validator always rejects, and the JSON Schema verdict matches what is recorded"
+      ],
+      "mutated_fail_count": 2,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M17",
+      "guard": "pace card: exactly one proposed action",
+      "doctrine": "Two cards means neither is the one thing (reboot plan §14).",
+      "file": "src/contracts/pace-card.ts",
+      "mutation": "  if (proposals.length !== 1) {  ->    if (false) {",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares",
+        "counterexamples: the validator always rejects, and the JSON Schema verdict matches what is recorded"
+      ],
+      "mutated_fail_count": 2,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M18",
+      "guard": "pace card: reviewed before delivery",
+      "doctrine": "Every card is reviewed by Emil before delivery (reboot plan §14).",
+      "file": "src/contracts/pace-card.ts",
+      "mutation": "    if (card.review_ref === null) {  ->      if (false) {",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares",
+        "counterexamples: the validator always rejects, and the JSON Schema verdict matches what is recorded"
+      ],
+      "mutated_fail_count": 2,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M19",
+      "guard": "consent: bundled and preselected are impossible",
+      "doctrine": "Bundled or preselected consent causes A2P rejection, which takes the assistant offline (CEDRUS.md I.15).",
+      "file": "src/contracts/consent.ts",
+      "mutation": "  bundled: literal(false),  ->    bundled: boolean(),",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares",
+        "the schemas on disk match what the generator would write",
+        "counterexamples: the validator always rejects, and the JSON Schema verdict matches what is recorded"
+      ],
+      "mutated_fail_count": 3,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M20",
+      "guard": "consent: the exact wording is required",
+      "doctrine": "Record the exact wording the person agreed to. It is the defensible record (CEDRUS.md I.15).",
+      "file": "src/contracts/consent.ts",
+      "mutation": "  exact_wording: string({  ->    exact_wording: string({",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares",
+        "the schemas on disk match what the generator would write",
+        "counterexamples: the validator always rejects, and the JSON Schema verdict matches what is recorded"
+      ],
+      "mutated_fail_count": 3,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M21",
+      "guard": "agent request: out of scope is logged and answered honestly",
+      "doctrine": "Anything outside the four jobs gets an honest answer and a logged request (CEDRUS.md I.6.4).",
+      "file": "src/contracts/agent-request.ts",
+      "mutation": "      if (request.response_kind === 'answered') {  ->        if (false) {",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares",
+        "counterexamples: the validator always rejects, and the JSON Schema verdict matches what is recorded"
+      ],
+      "mutated_fail_count": 2,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M22",
+      "guard": "agent request: safety replies are never tone shifted",
+      "doctrine": "STOP, HELP and distress stay in a fixed register regardless of setting (CEDRUS.md I.6.4).",
+      "file": "src/contracts/agent-request.ts",
+      "mutation": "      if (request.voice_applied) {  ->        if (false) {",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares",
+        "counterexamples: the validator always rejects, and the JSON Schema verdict matches what is recorded"
+      ],
+      "mutated_fail_count": 2,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M23",
+      "guard": "operator review: every kill and edit carries a reason",
+      "doctrine": "That log is the training signal for what to automate (reboot plan §14).",
+      "file": "src/contracts/operator-review.ts",
+      "mutation": "      if (review.reason_code === null) {  ->        if (false) {",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares",
+        "counterexamples: the validator always rejects, and the JSON Schema verdict matches what is recorded"
+      ],
+      "mutated_fail_count": 2,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M24",
+      "guard": "analytics: vanity metrics are rejected",
+      "doctrine": "No vanity metrics on any dashboard (reboot plan §24).",
+      "file": "src/contracts/analytics.ts",
+      "mutation": "      if (typeof name === 'string' && (VANITY_EVENT_NAMES as readonly string[]).includes(name)) {  ->        if (false) {",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares"
+      ],
+      "mutated_fail_count": 1,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M25",
+      "guard": "envelope: credentials never travel",
+      "doctrine": "connection_tokens is the one table where a grant mistake is a credential leak (reboot plan §20).",
+      "file": "src/contracts/envelope.ts",
+      "mutation": "      if (FORBIDDEN_SET.has(normaliseKey(node.key))) {  ->        if (false) {",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares"
+      ],
+      "mutated_fail_count": 1,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M26",
+      "guard": "migration: a value that cannot be known is never invented",
+      "doctrine": "Record silence explicitly rather than inferring it from absence (reboot plan §24, Lesson 5).",
+      "file": "src/migrate/migrations.ts",
+      "mutation": "    const source = outcome === 'silent' ? 'no_response' : 'unknown';  ->      const source = outcome === 'silent' ? 'no_response' : 'tap';",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "an outcome migration records \"unknown\" rather than guessing how the answer arrived"
+      ],
+      "mutated_fail_count": 1,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M27",
+      "guard": "migration: a connection cannot be upgraded without a named outcome",
+      "doctrine": "Manufacturing consent for a disclosure that never happened is worse than no row.",
+      "file": "src/migrate/migrations.ts",
+      "mutation": "    if (purpose === undefined || namedOutcome === undefined || disclosure === undefined) {  ->      if (false) {",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "a connection migration blocks: a named outcome and a purpose cannot be manufactured"
+      ],
+      "mutated_fail_count": 1,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M28",
+      "guard": "JSON Schema drift detection",
+      "doctrine": "A validator change that skips the schema regeneration must not pass silently.",
+      "file": "src/contracts/goals.ts",
+      "mutation": "  stated_text: string({ minLength: 3, maxLength: GOAL_TEXT_MAX_CHARS, description: \"The goal in the member's own words.\" }),  ->    stated_text: string({ minLength: 4, maxLength: GOAL_TEXT_MAX_CHARS, description: \"The goal in the member's own words.\" }),",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "the schemas on disk match what the generator would write"
+      ],
+      "mutated_fail_count": 1,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M29",
+      "guard": "availability: the basis and the notice must agree",
+      "doctrine": "Today always says which one it is (reboot plan §10, §12).",
+      "file": "src/contracts/calendar.ts",
+      "mutation": "    predicate: (a) => (a.basis === 'stated' ? a.fallback_notice !== null : a.fallback_notice === null),  ->      predicate: () => true,",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares",
+        "counterexamples: the validator always rejects, and the JSON Schema verdict matches what is recorded"
+      ],
+      "mutated_fail_count": 2,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    },
+    {
+      "id": "M30",
+      "guard": "progression: progress may not exceed its evidence",
+      "doctrine": "Progression reads outcomes directly; a number without records behind it is fabricated.",
+      "file": "src/contracts/pillars.ts",
+      "mutation": "      if (line.confirmed_helped.value > line.outcomes_recorded.value) {  ->        if (false) {",
+      "mutated_exit_code": 1,
+      "mutated_failing_tests": [
+        "every counterexample is rejected with the code it declares",
+        "counterexamples: the validator always rejects, and the JSON Schema verdict matches what is recorded"
+      ],
+      "mutated_fail_count": 2,
+      "restored_exit_code": 0,
+      "restored_pass_count": 97,
+      "status": "controlled"
+    }
+  ]
+}

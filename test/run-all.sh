@@ -81,4 +81,30 @@ echo "=== UI-09 — reminders read API (upcoming + delivery state) ==="
 bun test/reminders-api.test.mjs
 
 echo ""
+echo "=== Bundle 35 — CONTRACTS: vendored package enforced on POST /api/goals ==="
+# bun explicitly, not $RUNNER: the suite uses bun's mock.module.
+bun test/contracts-goals.test.mjs
+
+echo ""
+echo "=== contracts package: its own 97 tests + typecheck ==="
+# The vendored package carries its own suite. It needs its dev toolchain
+# (typescript, ajv), which is NOT committed, so this stage can only run where
+# `npm install` has been done inside contracts/.
+#
+# It announces which mode it ran in, every time. A skipped stage that prints
+# nothing is indistinguishable from a passing one, and that confusion is Lesson
+# 7's whole subject. The skip is deliberately NOT a battery failure: the
+# runtime path is contracts/dist/, which Bundle 35 exercises for real with no
+# toolchain at all.
+if [ -d contracts/node_modules ]; then
+  echo "contracts: toolchain present, running check"
+  ( cd contracts && npm run check --silent )
+else
+  echo "contracts: SKIPPED — contracts/node_modules is absent."
+  echo "contracts: this stage did NOT run. To run it: cd contracts && npm install && npm run check"
+  echo "contracts: the vendored package's runtime output (contracts/dist/) is still"
+  echo "contracts: covered by Bundle 35 above, which needs no toolchain."
+fi
+
+echo ""
 echo "ALL BATTERY SUITES PASSED"

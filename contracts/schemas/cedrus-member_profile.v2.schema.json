@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.cedrus.life/v0/cedrus-member_profile.v2.schema.json",
+  "title": "Member profile",
+  "description": "The fast profile. Only name and phone are required; everything else is skippable and absent means not asked.",
+  "x-cedrus-contract": "cedrus.member_profile",
+  "x-cedrus-version": 2,
+  "x-cedrus-sources": [
+    "CEDRUS.md I.6.2",
+    "CEDRUS.md I.7.7",
+    "reboot plan §10 /onboarding",
+    "reboot plan §15"
+  ],
+  "x-cedrus-fully-expressed": false,
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "member_id": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Canonical member id, `app_users` is canonical (reboot plan §15)."
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "description": "Name as the member typed it."
+    },
+    "name_source": {
+      "const": "member_entered"
+    },
+    "phone": {
+      "type": "string",
+      "pattern": "^[1-9]\\d{9,14}$",
+      "description": "Digits only, no plus. Matches app_users.phone."
+    },
+    "phone_verified_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+          "format": "date-time",
+          "description": "When the phone was verified."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "email": {
+      "type": "string",
+      "maxLength": 254,
+      "format": "email",
+      "description": "Optional. Email is not identity."
+    },
+    "timezone": {
+      "type": "string",
+      "pattern": "^[A-Za-z]+/[A-Za-z_+-]+$",
+      "description": "IANA timezone."
+    },
+    "work_setup": {
+      "type": "string",
+      "enum": [
+        "fully_remote",
+        "hybrid",
+        "flexible_other"
+      ]
+    },
+    "neighborhood": {
+      "type": "string",
+      "enum": [
+        "brickell",
+        "wynwood",
+        "little_havana",
+        "edgewater",
+        "coconut_grove",
+        "downtown",
+        "miami_beach",
+        "coral_gables",
+        "design_district",
+        "key_biscayne",
+        "other_miami_dade"
+      ]
+    },
+    "stated_free_windows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "weekday": {
+            "type": "string",
+            "enum": [
+              "monday",
+              "tuesday",
+              "wednesday",
+              "thursday",
+              "friday",
+              "saturday",
+              "sunday"
+            ]
+          },
+          "starts_at_local": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "description": "Local start, member timezone."
+          },
+          "ends_at_local": {
+            "type": "string",
+            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+            "description": "Local end, member timezone."
+          }
+        },
+        "required": [
+          "weekday",
+          "starts_at_local",
+          "ends_at_local"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 21
+    },
+    "activities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 60
+      },
+      "maxItems": 12
+    },
+    "current_groups": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 80
+      },
+      "maxItems": 12
+    },
+    "open_to_introductions": {
+      "type": "boolean"
+    },
+    "recommendable": {
+      "type": "boolean"
+    },
+    "onboarding_completed_steps": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "name",
+          "work_setup",
+          "neighborhood",
+          "free_windows",
+          "activities",
+          "current_groups",
+          "people",
+          "social_prefs"
+        ]
+      },
+      "maxItems": 8
+    },
+    "onboarding_completed_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+          "format": "date-time",
+          "description": "When onboarding finished, if it did."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+      "format": "date-time",
+      "description": "Record creation."
+    },
+    "updated_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+      "format": "date-time",
+      "description": "Last update."
+    }
+  },
+  "required": [
+    "schema_version",
+    "member_id",
+    "display_name",
+    "name_source",
+    "phone",
+    "phone_verified_at",
+    "timezone",
+    "open_to_introductions",
+    "recommendable",
+    "onboarding_completed_steps",
+    "onboarding_completed_at",
+    "created_at",
+    "updated_at"
+  ],
+  "additionalProperties": false
+}
