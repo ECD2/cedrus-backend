@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.cedrus.life/v0/cedrus-place_suggestion.v1.schema.json",
+  "title": "Place suggestion",
+  "description": "A curated place attached to a specific window. A place cannot be surfaced without one.",
+  "x-cedrus-contract": "cedrus.place_suggestion",
+  "x-cedrus-version": 1,
+  "x-cedrus-sources": [
+    "reboot plan §7 Places"
+  ],
+  "x-cedrus-fully-expressed": false,
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "place_ref": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "The curated place."
+    },
+    "member_id": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Canonical member id, `app_users` is canonical (reboot plan §15)."
+    },
+    "window": {
+      "type": "object",
+      "properties": {
+        "starts_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+          "format": "date-time",
+          "description": "From."
+        },
+        "ends_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+          "format": "date-time",
+          "description": "Until."
+        }
+      },
+      "required": [
+        "starts_at",
+        "ends_at"
+      ],
+      "additionalProperties": false
+    },
+    "rationale_statement_ref": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "The tagged statement carrying the reasoning."
+    }
+  },
+  "required": [
+    "schema_version",
+    "place_ref",
+    "member_id",
+    "window",
+    "rationale_statement_ref"
+  ],
+  "additionalProperties": false
+}

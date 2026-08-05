@@ -1,0 +1,299 @@
+{
+  "generated_by": "@cedrus/contracts scripts/generate-json-schemas.ts",
+  "dialect": "https://json-schema.org/draft/2020-12/schema",
+  "contracts": [
+    {
+      "name": "cedrus.statement",
+      "version": 1,
+      "title": "Statement",
+      "file": "cedrus-statement.v1.schema.json",
+      "fully_expressed_in_json_schema": true,
+      "sources": [
+        "CEDRUS.md I.7",
+        "reboot plan §10 /card/$id",
+        "reboot plan §13",
+        "reboot plan §19",
+        "reboot plan §27 risk 12"
+      ]
+    },
+    {
+      "name": "cedrus.member_profile",
+      "version": 2,
+      "title": "Member profile",
+      "file": "cedrus-member_profile.v2.schema.json",
+      "fully_expressed_in_json_schema": false,
+      "sources": [
+        "CEDRUS.md I.6.2",
+        "CEDRUS.md I.7.7",
+        "reboot plan §10 /onboarding",
+        "reboot plan §15"
+      ]
+    },
+    {
+      "name": "cedrus.goal",
+      "version": 2,
+      "title": "Goal",
+      "file": "cedrus-goal.v2.schema.json",
+      "fully_expressed_in_json_schema": true,
+      "sources": [
+        "reboot plan §10 /goals",
+        "reboot plan §19 user_goals.lane"
+      ]
+    },
+    {
+      "name": "cedrus.goal_set",
+      "version": 2,
+      "title": "Goal set",
+      "file": "cedrus-goal_set.v2.schema.json",
+      "fully_expressed_in_json_schema": false,
+      "sources": [
+        "reboot plan §10 /goals"
+      ]
+    },
+    {
+      "name": "cedrus.voice_preference",
+      "version": 1,
+      "title": "Voice preference",
+      "file": "cedrus-voice_preference.v1.schema.json",
+      "fully_expressed_in_json_schema": true,
+      "sources": [
+        "CEDRUS.md I.6.4",
+        "CEDRUS.md I.10 week 2"
+      ]
+    },
+    {
+      "name": "cedrus.consent_event",
+      "version": 1,
+      "title": "Consent event",
+      "file": "cedrus-consent_event.v1.schema.json",
+      "fully_expressed_in_json_schema": true,
+      "sources": [
+        "CEDRUS.md I.15 list ownership and consent",
+        "reboot plan §18",
+        "reboot plan §26"
+      ]
+    },
+    {
+      "name": "cedrus.permission_state",
+      "version": 1,
+      "title": "Permission state",
+      "file": "cedrus-permission_state.v1.schema.json",
+      "fully_expressed_in_json_schema": true,
+      "sources": [
+        "CEDRUS.md I.15 rules 1, 6, 7",
+        "reboot plan §22"
+      ]
+    },
+    {
+      "name": "cedrus.connection_authorization",
+      "version": 2,
+      "title": "Connector authorization",
+      "file": "cedrus-connection_authorization.v2.schema.json",
+      "fully_expressed_in_json_schema": false,
+      "sources": [
+        "reboot plan §16",
+        "reboot plan §17",
+        "reboot plan §18",
+        "reboot plan §19",
+        "reboot plan §27 risk 13"
+      ]
+    },
+    {
+      "name": "cedrus.calendar_freebusy_projection",
+      "version": 1,
+      "title": "Calendar free/busy projection",
+      "file": "cedrus-calendar_freebusy_projection.v1.schema.json",
+      "fully_expressed_in_json_schema": false,
+      "sources": [
+        "CEDRUS.md I.7.9",
+        "reboot plan §12",
+        "reboot plan §16 reading pattern",
+        "reboot plan §17"
+      ]
+    },
+    {
+      "name": "cedrus.availability",
+      "version": 1,
+      "title": "Availability",
+      "file": "cedrus-availability.v1.schema.json",
+      "fully_expressed_in_json_schema": false,
+      "sources": [
+        "reboot plan §11",
+        "reboot plan §12",
+        "CEDRUS.md II.4 lesson 7"
+      ]
+    },
+    {
+      "name": "cedrus.pace_card",
+      "version": 1,
+      "title": "Pace card",
+      "file": "cedrus-pace_card.v1.schema.json",
+      "fully_expressed_in_json_schema": false,
+      "sources": [
+        "reboot plan §3",
+        "reboot plan §10 /card/$id",
+        "reboot plan §14",
+        "reboot plan §19",
+        "reboot plan §27 risk 12"
+      ]
+    },
+    {
+      "name": "cedrus.card_outcome",
+      "version": 2,
+      "title": "Card outcome",
+      "file": "cedrus-card_outcome.v2.schema.json",
+      "fully_expressed_in_json_schema": false,
+      "sources": [
+        "reboot plan §6",
+        "reboot plan §13",
+        "reboot plan §19",
+        "reboot plan §24"
+      ]
+    },
+    {
+      "name": "cedrus.member_activity",
+      "version": 1,
+      "title": "Member activity",
+      "file": "cedrus-member_activity.v1.schema.json",
+      "fully_expressed_in_json_schema": true,
+      "sources": [
+        "reboot plan §13",
+        "reboot plan §19"
+      ]
+    },
+    {
+      "name": "cedrus.place",
+      "version": 1,
+      "title": "Place",
+      "file": "cedrus-place.v1.schema.json",
+      "fully_expressed_in_json_schema": true,
+      "sources": [
+        "CEDRUS.md I.4 Places",
+        "reboot plan §7 Places"
+      ]
+    },
+    {
+      "name": "cedrus.place_suggestion",
+      "version": 1,
+      "title": "Place suggestion",
+      "file": "cedrus-place_suggestion.v1.schema.json",
+      "fully_expressed_in_json_schema": false,
+      "sources": [
+        "reboot plan §7 Places"
+      ]
+    },
+    {
+      "name": "cedrus.person",
+      "version": 1,
+      "title": "Person",
+      "file": "cedrus-person.v1.schema.json",
+      "fully_expressed_in_json_schema": false,
+      "sources": [
+        "CEDRUS.md I.4 People",
+        "CEDRUS.md I.7 items 4, 5, 8",
+        "reboot plan §7 People"
+      ]
+    },
+    {
+      "name": "cedrus.plan",
+      "version": 1,
+      "title": "Plan",
+      "file": "cedrus-plan.v1.schema.json",
+      "fully_expressed_in_json_schema": false,
+      "sources": [
+        "CEDRUS.md I.4 Plans",
+        "reboot plan §7 Plans"
+      ]
+    },
+    {
+      "name": "cedrus.progression",
+      "version": 1,
+      "title": "Progression",
+      "file": "cedrus-progression.v1.schema.json",
+      "fully_expressed_in_json_schema": false,
+      "sources": [
+        "CEDRUS.md I.4 Progression",
+        "CEDRUS.md I.7.3",
+        "reboot plan §7",
+        "reboot plan §10 /progress",
+        "reboot plan §19"
+      ]
+    },
+    {
+      "name": "cedrus.today_state",
+      "version": 1,
+      "title": "Today state",
+      "file": "cedrus-today_state.v1.schema.json",
+      "fully_expressed_in_json_schema": false,
+      "sources": [
+        "CEDRUS.md I.6.3",
+        "reboot plan §10 /today",
+        "reboot plan §11",
+        "reboot plan §12",
+        "CEDRUS.md II.4 lesson 7"
+      ]
+    },
+    {
+      "name": "cedrus.operator_review",
+      "version": 1,
+      "title": "Operator review",
+      "file": "cedrus-operator_review.v1.schema.json",
+      "fully_expressed_in_json_schema": false,
+      "sources": [
+        "reboot plan §14 step 4",
+        "reboot plan §18",
+        "reboot plan §24 card.reviewed"
+      ]
+    },
+    {
+      "name": "cedrus.agent_request",
+      "version": 1,
+      "title": "Agent request",
+      "file": "cedrus-agent_request.v1.schema.json",
+      "fully_expressed_in_json_schema": false,
+      "sources": [
+        "CEDRUS.md I.6.4",
+        "CEDRUS.md I.15 requirement this creates",
+        "reboot plan §10 SMS handoff",
+        "reboot plan §24"
+      ]
+    },
+    {
+      "name": "cedrus.analytics_event",
+      "version": 1,
+      "title": "Analytics event",
+      "file": "cedrus-analytics_event.v1.schema.json",
+      "fully_expressed_in_json_schema": false,
+      "sources": [
+        "reboot plan §24",
+        "CEDRUS.md I.11",
+        "CEDRUS.md I.4"
+      ]
+    },
+    {
+      "name": "cedrus.data_envelope",
+      "version": 1,
+      "title": "Import/export envelope",
+      "file": "cedrus-data_envelope.v1.schema.json",
+      "fully_expressed_in_json_schema": false,
+      "sources": [
+        "CEDRUS.md I.15 rule 8",
+        "reboot plan §16 item 4",
+        "reboot plan §18",
+        "reboot plan §19"
+      ]
+    },
+    {
+      "name": "cedrus.api_error",
+      "version": 1,
+      "title": "API error",
+      "file": "cedrus-api_error.v1.schema.json",
+      "fully_expressed_in_json_schema": false,
+      "sources": [
+        "CEDRUS.md II.2",
+        "CEDRUS.md II.4 lessons 1 and 17",
+        "reboot plan §18"
+      ]
+    }
+  ]
+}

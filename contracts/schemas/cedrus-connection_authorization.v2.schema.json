@@ -1,0 +1,248 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.cedrus.life/v0/cedrus-connection_authorization.v2.schema.json",
+  "title": "Connector authorization",
+  "description": "One authorized connection. Requires a named outcome, one narrow purpose, and a scope allowlist that only covers free/busy.",
+  "x-cedrus-contract": "cedrus.connection_authorization",
+  "x-cedrus-version": 2,
+  "x-cedrus-sources": [
+    "reboot plan §16",
+    "reboot plan §17",
+    "reboot plan §18",
+    "reboot plan §19",
+    "reboot plan §27 risk 13"
+  ],
+  "x-cedrus-fully-expressed": false,
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "connection_id": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Connection id."
+    },
+    "member_id": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Canonical member id, `app_users` is canonical (reboot plan §15)."
+    },
+    "provider": {
+      "type": "string",
+      "enum": [
+        "google_calendar"
+      ]
+    },
+    "scopes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "calendar.freebusy.read"
+        ]
+      },
+      "minItems": 1,
+      "maxItems": 1
+    },
+    "purpose": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "place_suggestions_in_open_time"
+          ]
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 300,
+          "description": "The purpose, as shown on the pre-consent screen."
+        }
+      },
+      "required": [
+        "code",
+        "statement"
+      ],
+      "additionalProperties": false
+    },
+    "named_outcome": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "suggestions_land_in_time_you_actually_have",
+            "today_stops_guessing_at_your_timing"
+          ]
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 300,
+          "description": "What the member gets, in checkable words.",
+          "not": {
+            "anyOf": [
+              {
+                "pattern": "(^|[^A-Za-z])[iI][mM][pP][rR][oO][vV][eE]\\s+[yY][oO][uU][rR]\\s+[eE][xX][pP][eE][rR][iI][eE][nN][cC][eE]([^A-Za-z]|$)"
+              },
+              {
+                "pattern": "(^|[^A-Za-z])[bB][eE][tT][tT][eE][rR]\\s+[sS][eE][rR][vV][iI][cC][eE]([^A-Za-z]|$)"
+              },
+              {
+                "pattern": "(^|[^A-Za-z])[sS][eE][rR][vV][eE]\\s+[yY][oO][uU]\\s+[bB][eE][tT][tT][eE][rR]([^A-Za-z]|$)"
+              },
+              {
+                "pattern": "(^|[^A-Za-z])[pP][eE][rR][sS][oO][nN][aA][lL][iI][zZ][aA][tT][iI][oO][nN]([^A-Za-z]|$)"
+              },
+              {
+                "pattern": "(^|[^A-Za-z])[pP][eE][rR][sS][oO][nN][aA][lL][iI][sS][aA][tT][iI][oO][nN]([^A-Za-z]|$)"
+              },
+              {
+                "pattern": "(^|[^A-Za-z])[aA][nN][aA][lL][yY][tT][iI][cC][sS]([^A-Za-z]|$)"
+              },
+              {
+                "pattern": "(^|[^A-Za-z])[pP][rR][oO][dD][uU][cC][tT]\\s+[iI][mM][pP][rR][oO][vV][eE][mM][eE][nN][tT]([^A-Za-z]|$)"
+              },
+              {
+                "pattern": "(^|[^A-Za-z])[tT][oO]\\s+[hH][eE][lL][pP]\\s+[uU][sS]([^A-Za-z]|$)"
+              },
+              {
+                "pattern": "(^|[^A-Za-z])[eE][nN][hH][aA][nN][cC][eE]([^A-Za-z]|$)"
+              },
+              {
+                "pattern": "(^|[^A-Za-z])[oO][pP][tT][iI][mM][iI][zZ][eE]([^A-Za-z]|$)"
+              },
+              {
+                "pattern": "(^|[^A-Za-z])[oO][pP][tT][iI][mM][iI][sS][eE]([^A-Za-z]|$)"
+              }
+            ]
+          }
+        }
+      },
+      "required": [
+        "code",
+        "statement"
+      ],
+      "additionalProperties": false
+    },
+    "disclosure": {
+      "type": "object",
+      "properties": {
+        "reads": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 300
+        },
+        "does_not_read": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 300
+        },
+        "will_do": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 300
+        },
+        "does_not_do": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 300
+        }
+      },
+      "required": [
+        "reads",
+        "does_not_read",
+        "will_do",
+        "does_not_do"
+      ],
+      "additionalProperties": false
+    },
+    "consent_ref": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "The consent event recording this authorization."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "authorized",
+        "expired",
+        "revoked",
+        "disconnected",
+        "failed"
+      ]
+    },
+    "authorized_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+      "format": "date-time",
+      "description": "When the member authorized."
+    },
+    "last_sync_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+          "format": "date-time",
+          "description": "Last successful free/busy read."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "revoked_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+          "format": "date-time",
+          "description": "When it was revoked."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "token_storage": {
+      "const": "server_only"
+    },
+    "revocable": {
+      "const": true
+    },
+    "writes_to_provider": {
+      "const": false
+    },
+    "state_validated": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "schema_version",
+    "connection_id",
+    "member_id",
+    "provider",
+    "scopes",
+    "purpose",
+    "named_outcome",
+    "disclosure",
+    "consent_ref",
+    "status",
+    "authorized_at",
+    "last_sync_at",
+    "revoked_at",
+    "token_storage",
+    "revocable",
+    "writes_to_provider",
+    "state_validated"
+  ],
+  "additionalProperties": false
+}

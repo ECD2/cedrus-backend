@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.cedrus.life/v0/cedrus-goal_set.v2.schema.json",
+  "title": "Goal set",
+  "description": "Up to three goals for one member. Zero is a valid state.",
+  "x-cedrus-contract": "cedrus.goal_set",
+  "x-cedrus-version": 2,
+  "x-cedrus-sources": [
+    "reboot plan §10 /goals"
+  ],
+  "x-cedrus-fully-expressed": false,
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "member_id": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Canonical member id, `app_users` is canonical (reboot plan §15)."
+    },
+    "goals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "schema_version": {
+            "const": 2
+          },
+          "goal_id": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 96,
+            "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+            "description": "Goal id."
+          },
+          "member_id": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 96,
+            "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+            "description": "Canonical member id, `app_users` is canonical (reboot plan §15)."
+          },
+          "stated_text": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 280,
+            "description": "The goal in the member's own words."
+          },
+          "lane": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "work",
+                  "people",
+                  "body"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cadence_text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "description": "e.g. \"a couple of times a week\"."
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "user_set",
+              "cedrus_inferred",
+              "operator_entered"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "completed",
+              "missed",
+              "canceled"
+            ]
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3,
+                "description": "Member-set rank."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+            "format": "date-time",
+            "description": "Created."
+          },
+          "updated_at": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+            "format": "date-time",
+            "description": "Updated."
+          }
+        },
+        "required": [
+          "schema_version",
+          "goal_id",
+          "member_id",
+          "stated_text",
+          "lane",
+          "origin",
+          "status",
+          "priority",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 3,
+      "description": "Three is a ceiling. One is enough."
+    },
+    "one_is_enough_shown": {
+      "type": "boolean"
+    },
+    "updated_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+      "format": "date-time",
+      "description": "Updated."
+    }
+  },
+  "required": [
+    "schema_version",
+    "member_id",
+    "goals",
+    "one_is_enough_shown",
+    "updated_at"
+  ],
+  "additionalProperties": false
+}

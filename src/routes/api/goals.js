@@ -40,8 +40,14 @@ export function createGoalsRouter(deps = {}) {
   // wrapper as routes/api/interests.js `handle` — keep them in step.
   const handle = (name, fn) => async (req, res) => {
     const t0 = Date.now();
+    // Hoisted out of runWithContext so a handler can put the same id in a
+    // response body, not just in the log line. The contract 422 carries it, so
+    // a rejected payload and its log record can be joined (Lesson 17: an error
+    // a human cannot trace back costs hours).
+    const requestId = crypto.randomUUID();
+    req.cedrusRequestId = requestId;
     await logger.runWithContext(
-      { correlation_id: crypto.randomUUID(), request_id: crypto.randomUUID() },
+      { correlation_id: crypto.randomUUID(), request_id: requestId },
       async () => {
         logger.addContext({ user_ref: 'u_' + req.appUser.id });
         try {
@@ -56,10 +62,18 @@ export function createGoalsRouter(deps = {}) {
           // have its message forwarded to the client.
           const known = err && err.status && err.code && err.publicMessage;
           const status = known ? err.status : 500;
-          res.status(status).json({
-            error: known ? err.code : 'internal',
-            message: known ? err.publicMessage : MSG_INTERNAL,
-          });
+          // A contract rejection answers in the contract package's own error
+          // shape (`cedrus.api_error`), so the caller gets the contract name and
+          // the exact issue paths instead of one flattened sentence. Everything
+          // else keeps the {error, message} shape this router has always used.
+          if (known && err.apiError) {
+            res.status(status).json(err.apiError);
+          } else {
+            res.status(status).json({
+              error: known ? err.code : 'internal',
+              message: known ? err.publicMessage : MSG_INTERNAL,
+            });
+          }
           logger.event(`web.${name}.rejected`, {
             level: status >= 500 ? 'error' : 'warn',
             error_category: status >= 500 ? 'internal' : 'validation',
@@ -82,7 +96,8 @@ export function createGoalsRouter(deps = {}) {
 
   // Add (unlimited — the add IS the user stating the goal).
   router.post('/', handle('goals.add', (req) =>
-    goals.addGoal({ user: req.appUser, body: req.body }, deps.goals)));
+    goals.addGoal({ user: req.appUser, body: req.body },
+      { ...deps.goals, requestId: req.cedrusRequestId })));
 
   // Update: edit text, re-rank priority, change due date, mark done / reactivate.
   router.patch('/:id', handle('goals.update', (req) =>

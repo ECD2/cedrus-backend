@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.cedrus.life/v0/cedrus-person.v1.schema.json",
+  "title": "Person",
+  "description": "Someone the member told Cedrus about. Never invented, never enriched, never carrying contact details.",
+  "x-cedrus-contract": "cedrus.person",
+  "x-cedrus-version": 1,
+  "x-cedrus-sources": [
+    "CEDRUS.md I.4 People",
+    "CEDRUS.md I.7 items 4, 5, 8",
+    "reboot plan §7 People"
+  ],
+  "x-cedrus-fully-expressed": false,
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "person_id": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Person id."
+    },
+    "member_id": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Canonical member id, `app_users` is canonical (reboot plan §15)."
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "origin": {
+      "type": "string",
+      "enum": [
+        "member_stated",
+        "operator_entered"
+      ]
+    },
+    "relationship_text": {
+      "type": "string",
+      "maxLength": 120,
+      "description": "In the member's words."
+    },
+    "introduction_state": {
+      "type": "string",
+      "enum": [
+        "none",
+        "requested",
+        "both_opted_in",
+        "declined"
+      ]
+    },
+    "introduction_consent_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 5,
+        "maxLength": 96,
+        "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+        "description": "A consent event for this specific introduction."
+      },
+      "maxItems": 2
+    },
+    "last_mentioned_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+          "format": "date-time",
+          "description": "When the member last mentioned them."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+      "format": "date-time",
+      "description": "Created."
+    }
+  },
+  "required": [
+    "schema_version",
+    "person_id",
+    "member_id",
+    "display_name",
+    "origin",
+    "introduction_state",
+    "introduction_consent_refs",
+    "last_mentioned_at",
+    "created_at"
+  ],
+  "additionalProperties": false
+}

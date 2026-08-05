@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.cedrus.life/v0/cedrus-calendar_freebusy_projection.v1.schema.json",
+  "title": "Calendar free/busy projection",
+  "description": "Busy intervals for a bounded forward window. Titles, descriptions, locations and attendees have no representation in this contract.",
+  "x-cedrus-contract": "cedrus.calendar_freebusy_projection",
+  "x-cedrus-version": 1,
+  "x-cedrus-sources": [
+    "CEDRUS.md I.7.9",
+    "reboot plan §12",
+    "reboot plan §16 reading pattern",
+    "reboot plan §17"
+  ],
+  "x-cedrus-fully-expressed": false,
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "member_id": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Canonical member id, `app_users` is canonical (reboot plan §15)."
+    },
+    "connection_ref": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 96,
+          "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "description": "The authorization this projection came from."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "provider": {
+      "const": "google_calendar"
+    },
+    "window": {
+      "type": "object",
+      "properties": {
+        "starts_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+          "format": "date-time",
+          "description": "Projection window start."
+        },
+        "ends_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+          "format": "date-time",
+          "description": "Projection window end."
+        }
+      },
+      "required": [
+        "starts_at",
+        "ends_at"
+      ],
+      "additionalProperties": false
+    },
+    "busy": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "starts_at": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+            "format": "date-time",
+            "description": "Busy from, UTC."
+          },
+          "ends_at": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+            "format": "date-time",
+            "description": "Busy until, UTC."
+          }
+        },
+        "required": [
+          "starts_at",
+          "ends_at"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 500,
+      "description": "Busy intervals only. No titles, descriptions, locations, or attendees exist in this shape."
+    },
+    "freshness": {
+      "type": "string",
+      "enum": [
+        "live",
+        "stale",
+        "disconnected"
+      ]
+    },
+    "synced_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+          "format": "date-time",
+          "description": "Last successful read. Null when the projection has never run."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "member_id",
+    "connection_ref",
+    "provider",
+    "window",
+    "busy",
+    "freshness",
+    "synced_at"
+  ],
+  "additionalProperties": false
+}

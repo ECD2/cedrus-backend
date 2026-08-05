@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.cedrus.life/v0/cedrus-consent_event.v1.schema.json",
+  "title": "Consent event",
+  "description": "One consent decision, per purpose, with the exact wording. Append-only: superseded, never rewritten.",
+  "x-cedrus-contract": "cedrus.consent_event",
+  "x-cedrus-version": 1,
+  "x-cedrus-sources": [
+    "CEDRUS.md I.15 list ownership and consent",
+    "reboot plan §18",
+    "reboot plan §26"
+  ],
+  "x-cedrus-fully-expressed": true,
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "consent_id": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Consent event id."
+    },
+    "member_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 96,
+          "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "description": "Canonical member id, `app_users` is canonical (reboot plan §15)."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "contact_ref": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "The acquisition record this consent belongs to."
+    },
+    "channel": {
+      "type": "string",
+      "enum": [
+        "email_marketing",
+        "email_transactional",
+        "sms_assistant",
+        "connection"
+      ]
+    },
+    "granted": {
+      "type": "boolean"
+    },
+    "exact_wording": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 2000,
+      "description": "Verbatim wording the person agreed to. Never rewritten, ever, including by a migration."
+    },
+    "bundled": {
+      "const": false
+    },
+    "preselected": {
+      "const": false
+    },
+    "occurred_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+      "format": "date-time",
+      "description": "When consent was given or withdrawn. Note: the column is occurred_at, not created_at."
+    },
+    "ip_address": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 45,
+      "description": "Captured at signup for the audit trail."
+    },
+    "user_agent": {
+      "type": "string",
+      "maxLength": 400
+    },
+    "superseded_by": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 96,
+          "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "description": "A later consent event that supersedes this one."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "consent_id",
+    "member_id",
+    "contact_ref",
+    "channel",
+    "granted",
+    "exact_wording",
+    "bundled",
+    "preselected",
+    "occurred_at",
+    "superseded_by"
+  ],
+  "additionalProperties": false
+}

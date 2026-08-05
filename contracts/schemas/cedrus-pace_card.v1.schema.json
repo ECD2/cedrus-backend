@@ -1,0 +1,547 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.cedrus.life/v0/cedrus-pace_card.v1.schema.json",
+  "title": "Pace card",
+  "description": "One card: a goal, tagged statements about what is known and what is inferred, and exactly one proposed action sized to a window.",
+  "x-cedrus-contract": "cedrus.pace_card",
+  "x-cedrus-version": 1,
+  "x-cedrus-sources": [
+    "reboot plan §3",
+    "reboot plan §10 /card/$id",
+    "reboot plan §14",
+    "reboot plan §19",
+    "reboot plan §27 risk 12"
+  ],
+  "x-cedrus-fully-expressed": false,
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "card_id": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Card id."
+    },
+    "member_id": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Canonical member id, `app_users` is canonical (reboot plan §15)."
+    },
+    "goal_ref": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "The goal this card serves."
+    },
+    "for_date": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+      "format": "date",
+      "description": "The member-local day this card is for."
+    },
+    "parts": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "statement_id": {
+                "type": "string",
+                "minLength": 5,
+                "maxLength": 96,
+                "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "description": "Statement id."
+              },
+              "kind": {
+                "const": "known"
+              },
+              "text": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 400,
+                "description": "One statement, in plain language.",
+                "not": {
+                  "anyOf": [
+                    {
+                      "pattern": "(^|[^A-Za-z])[uU][sS][uU][aA][lL][lL][yY]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[pP][rR][oO][bB][aA][bB][lL][yY]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[mM][iI][gG][hH][tT]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[mM][aA][yY][bB][eE]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[sS][eE][eE][mM][sS]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[lL][oO][oO][kK][sS]\\s+[lL][iI][kK][eE]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[lL][iI][kK][eE][lL][yY]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[iI]\\s+[tT][hH][iI][nN][kK]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[iI]\\s+[gG][uU][eE][sS][sS]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[sS][hH][oO][uU][lL][dD]\\s+[bB][eE]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[tT][eE][nN][dD][sS]\\s+[tT][oO]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[oO][fF][tT][eE][nN]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[pP][eE][rR][hH][aA][pP][sS]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[mM][yY]\\s+[gG][uU][eE][sS][sS]([^A-Za-z]|$)"
+                    }
+                  ]
+                }
+              },
+              "source": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "calendar_freebusy",
+                      "member_stated",
+                      "operator_entered",
+                      "system_record"
+                    ]
+                  },
+                  "ref": {
+                    "type": "string",
+                    "minLength": 5,
+                    "maxLength": 96,
+                    "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                    "description": "The record this was read from."
+                  }
+                },
+                "required": [
+                  "type",
+                  "ref"
+                ],
+                "additionalProperties": false
+              },
+              "observed_at": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+                "format": "date-time",
+                "description": "When the fact was observed."
+              },
+              "derived_from": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 5,
+                  "maxLength": 96,
+                  "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                  "description": "A statement this was derived from."
+                }
+              }
+            },
+            "required": [
+              "statement_id",
+              "kind",
+              "text",
+              "source",
+              "observed_at"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "statement_id": {
+                "type": "string",
+                "minLength": 5,
+                "maxLength": 96,
+                "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "description": "Statement id."
+              },
+              "kind": {
+                "const": "user_reported"
+              },
+              "text": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 400,
+                "description": "One statement, in plain language."
+              },
+              "source": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "member_sms",
+                      "member_tap",
+                      "operator_entered"
+                    ]
+                  },
+                  "ref": {
+                    "type": "string",
+                    "minLength": 5,
+                    "maxLength": 96,
+                    "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                    "description": "The message or tap this was captured from."
+                  }
+                },
+                "required": [
+                  "type",
+                  "ref"
+                ],
+                "additionalProperties": false
+              },
+              "reported_at": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+                "format": "date-time",
+                "description": "When the member reported it."
+              },
+              "verified": {
+                "const": false
+              }
+            },
+            "required": [
+              "statement_id",
+              "kind",
+              "text",
+              "source",
+              "reported_at",
+              "verified"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "statement_id": {
+                "type": "string",
+                "minLength": 5,
+                "maxLength": 96,
+                "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "description": "Statement id."
+              },
+              "kind": {
+                "const": "inferred"
+              },
+              "text": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 400,
+                "description": "One statement, in plain language.",
+                "not": {
+                  "anyOf": [
+                    {
+                      "pattern": "(^|[^A-Za-z])[dD][eE][fF][iI][nN][iI][tT][eE][lL][yY]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[cC][eE][rR][tT][aA][iI][nN][lL][yY]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[cC][oO][nN][fF][iI][rR][mM][eE][dD]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[gG][uU][aA][rR][aA][nN][tT][eE][eE][dD]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[fF][oO][rR]\\s+[sS][uU][rR][eE]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[wW][iI][tT][hH][oO][uU][tT]\\s+[aA]\\s+[dD][oO][uU][bB][tT]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[pP][rR][oO][vV][eE][nN]([^A-Za-z]|$)"
+                    },
+                    {
+                      "pattern": "(^|[^A-Za-z])[vV][eE][rR][iI][fF][iI][eE][dD]([^A-Za-z]|$)"
+                    }
+                  ]
+                }
+              },
+              "source": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "model_inference",
+                      "heuristic",
+                      "statistical_prior"
+                    ]
+                  },
+                  "ref": {
+                    "type": "string",
+                    "minLength": 5,
+                    "maxLength": 96,
+                    "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                    "description": "The model run or heuristic that produced it."
+                  }
+                },
+                "required": [
+                  "type",
+                  "ref"
+                ],
+                "additionalProperties": false
+              },
+              "hedge": {
+                "type": "string",
+                "enum": [
+                  "usually",
+                  "often",
+                  "probably",
+                  "looks like",
+                  "might"
+                ]
+              },
+              "confidence": {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              "basis": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 5,
+                  "maxLength": 96,
+                  "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                  "description": "A record this inference rests on."
+                },
+                "minItems": 1
+              },
+              "inferred_at": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+                "format": "date-time",
+                "description": "When the inference was made."
+              },
+              "derived_from": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 5,
+                  "maxLength": 96,
+                  "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                  "description": "A statement this was derived from."
+                }
+              }
+            },
+            "required": [
+              "statement_id",
+              "kind",
+              "text",
+              "source",
+              "hedge",
+              "confidence",
+              "basis",
+              "inferred_at"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "statement_id": {
+                "type": "string",
+                "minLength": 5,
+                "maxLength": 96,
+                "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "description": "Statement id."
+              },
+              "kind": {
+                "const": "proposed_action"
+              },
+              "text": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 400,
+                "description": "One statement, in plain language."
+              },
+              "window": {
+                "type": "object",
+                "properties": {
+                  "starts_at": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+                    "format": "date-time",
+                    "description": "Proposed window start."
+                  },
+                  "ends_at": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+                    "format": "date-time",
+                    "description": "Proposed window end."
+                  }
+                },
+                "required": [
+                  "starts_at",
+                  "ends_at"
+                ],
+                "additionalProperties": false
+              },
+              "goal_ref": {
+                "type": "string",
+                "minLength": 5,
+                "maxLength": 96,
+                "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "description": "The goal this action serves."
+              },
+              "place_ref": {
+                "type": "string",
+                "minLength": 5,
+                "maxLength": 96,
+                "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "description": "An operator-curated place, if the action has one."
+              },
+              "person_ref": {
+                "type": "string",
+                "minLength": 5,
+                "maxLength": 96,
+                "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+                "description": "A member-stated person, if the action has one."
+              },
+              "urgency": {
+                "const": "none"
+              }
+            },
+            "required": [
+              "statement_id",
+              "kind",
+              "text",
+              "window",
+              "goal_ref",
+              "urgency"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "minItems": 2,
+      "maxItems": 8,
+      "description": "Tagged statements. Exactly one proposed_action; at least one known or user_reported."
+    },
+    "window": {
+      "type": "object",
+      "properties": {
+        "starts_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+          "format": "date-time",
+          "description": "Window start."
+        },
+        "ends_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+          "format": "date-time",
+          "description": "Window end."
+        }
+      },
+      "required": [
+        "starts_at",
+        "ends_at"
+      ],
+      "additionalProperties": false
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "approved",
+        "edited",
+        "killed",
+        "delivered"
+      ]
+    },
+    "review_ref": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 96,
+          "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "description": "The operator review that decided this card."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+      "format": "date-time",
+      "description": "Created."
+    },
+    "delivered_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+          "format": "date-time",
+          "description": "Delivered, if it was."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "delivered_via": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "web",
+            "sms"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "voice_ref": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "The voice preference in force when this was drafted."
+    }
+  },
+  "required": [
+    "schema_version",
+    "card_id",
+    "member_id",
+    "goal_ref",
+    "for_date",
+    "parts",
+    "window",
+    "status",
+    "review_ref",
+    "created_at",
+    "delivered_at",
+    "delivered_via"
+  ],
+  "additionalProperties": false
+}

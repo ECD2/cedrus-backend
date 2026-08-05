@@ -120,6 +120,7 @@
   // add: stores a user-set, open goal and returns a clean public shape ────────
   println('add: stores an open user-set goal, unlimited, public shape only');
   __reset();
+  contractGuardCalls.length = 0;
   const added = await addGoal({ user, body: { goal_text: '  Run a half marathon  ' } });
   check('add returns created:true', added.created === true);
   check('add trims and stores the goal text', added.goal.goal_text === 'Run a half marathon');
@@ -136,6 +137,17 @@
   // Postgres sorts NULLS FIRST on DESC, so a null would take the brief's [0] slot.
   check('stored row week_of is a stamped YYYY-MM-DD, not null',
     typeof storedRow.week_of === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(storedRow.week_of));
+
+  // The contract check is wired in. This bundle runs the STUB guard (see
+  // test/stub-contract-guard.js), so what is proven here is only that addGoal
+  // still calls it, with the cleaned text and the server-owned columns. Delete
+  // the call site and these three go red. The guard's own two branches are
+  // proven against the real thing in test/contracts-goals.test.mjs.
+  check('addGoal invokes the contract guard exactly once', contractGuardCalls.length === 1);
+  check('the guard sees the CLEANED text, not the raw body',
+    contractGuardCalls[0].row.goal_text === 'Run a half marathon');
+  check('the guard sees the server-owned origin and status',
+    contractGuardCalls[0].row.origin === 'user_set' && contractGuardCalls[0].row.status === 'open');
 
   // unlimited: no per-user cap ────────────────────────────────────────────────
   println('add: unlimited — no per-user storage cap');

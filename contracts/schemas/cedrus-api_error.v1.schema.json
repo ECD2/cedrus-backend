@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.cedrus.life/v0/cedrus-api_error.v1.schema.json",
+  "title": "API error",
+  "description": "A failure response. Never a 2xx, always specific enough to act on, never carrying member or calendar content.",
+  "x-cedrus-contract": "cedrus.api_error",
+  "x-cedrus-version": 1,
+  "x-cedrus-sources": [
+    "CEDRUS.md II.2",
+    "CEDRUS.md II.4 lessons 1 and 17",
+    "reboot plan §18"
+  ],
+  "x-cedrus-fully-expressed": false,
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "http_status": {
+      "type": "integer",
+      "minimum": 400,
+      "maximum": 599
+    },
+    "code": {
+      "type": "string",
+      "enum": [
+        "contract_violation",
+        "not_found",
+        "not_authorized",
+        "not_authenticated",
+        "rate_limited",
+        "budget_guard_tripped",
+        "connection_required",
+        "connection_expired",
+        "out_of_scope",
+        "conflict",
+        "dependency_unavailable",
+        "internal_error"
+      ]
+    },
+    "problem": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 200
+    },
+    "contract": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 80
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Dotted path into the payload. Never a value."
+          },
+          "code": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 80
+          },
+          "explanation": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 300
+          }
+        },
+        "required": [
+          "path",
+          "code",
+          "explanation"
+        ],
+        "additionalProperties": false
+      },
+      "maxItems": 50
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "retry_after_seconds": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "debug_ref": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 96,
+          "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "description": "A reference an operator can follow into the logs."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Request id."
+    },
+    "occurred_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+      "format": "date-time",
+      "description": "When it happened."
+    },
+    "operator_hint": {
+      "type": "string",
+      "maxLength": 300
+    }
+  },
+  "required": [
+    "schema_version",
+    "http_status",
+    "code",
+    "problem",
+    "contract",
+    "issues",
+    "retryable",
+    "retry_after_seconds",
+    "debug_ref",
+    "request_id",
+    "occurred_at"
+  ],
+  "additionalProperties": false
+}

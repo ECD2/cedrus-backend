@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.cedrus.life/v0/cedrus-agent_request.v1.schema.json",
+  "title": "Agent request",
+  "description": "One inbound request. Open input, narrow promise: out of scope is recorded as out of scope, logged, and answered honestly.",
+  "x-cedrus-contract": "cedrus.agent_request",
+  "x-cedrus-version": 1,
+  "x-cedrus-sources": [
+    "CEDRUS.md I.6.4",
+    "CEDRUS.md I.15 requirement this creates",
+    "reboot plan §10 SMS handoff",
+    "reboot plan §24"
+  ],
+  "x-cedrus-fully-expressed": false,
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+      "description": "Request id."
+    },
+    "member_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 96,
+          "pattern": "^[a-z][a-z0-9_]{1,31}:[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+          "description": "Canonical member id, `app_users` is canonical (reboot plan §15)."
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "channel": {
+      "type": "string",
+      "enum": [
+        "sms",
+        "web"
+      ]
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1600
+    },
+    "received_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$",
+      "format": "date-time",
+      "description": "When it arrived."
+    },
+    "in_scope": {
+      "type": "boolean"
+    },
+    "scope_job": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "find_somewhere_to_work",
+            "suggest_for_open_window",
+            "make_or_schedule_plan",
+            "record_what_happened",
+            "answer_goal_or_progress"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "response_kind": {
+      "type": "string",
+      "enum": [
+        "answered",
+        "honest_decline",
+        "safety_fixed_register",
+        "deferred_to_operator"
+      ]
+    },
+    "logged_as_request": {
+      "type": "boolean"
+    },
+    "fixed_register_trigger": {
+      "type": "string",
+      "enum": [
+        "stop",
+        "help",
+        "distress",
+        "none"
+      ]
+    },
+    "voice_applied": {
+      "type": "boolean"
+    },
+    "operator_note": {
+      "type": "string",
+      "maxLength": 300
+    }
+  },
+  "required": [
+    "schema_version",
+    "request_id",
+    "member_id",
+    "channel",
+    "text",
+    "received_at",
+    "in_scope",
+    "scope_job",
+    "response_kind",
+    "logged_as_request",
+    "fixed_register_trigger",
+    "voice_applied"
+  ],
+  "additionalProperties": false
+}
