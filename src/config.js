@@ -1,10 +1,20 @@
 import dotenv from 'dotenv';
+import { normalizePhone } from './utils/phone.js';
 dotenv.config();
 
 function required(name) {
   const v = process.env[name];
   if (!v) { console.error(`FATAL: missing required env var ${name}`); process.exit(1); }
   return v;
+}
+
+// Comma-separated phone allow-list → THE ONE TRUE PHONE FORMAT (utils/phone.js).
+// Deliberately routed through normalizePhone rather than a local regex: the SMS
+// identity lookup (users.findOrCreateByPhone) normalizes the inbound `From` with
+// that same function, so an allow-list entry and the number it is meant to match
+// cannot drift apart. Empty/unset ⇒ [].
+function parsePhoneList(raw) {
+  return String(raw || '').split(',').map(normalizePhone).filter(Boolean);
 }
 
 // Daily budget envs: a positive number arms that dimension of the budget guard;
@@ -44,9 +54,15 @@ export const config = {
   // Comma-separated allow-list of phone numbers permitted for POST
   // /admin/reset-user (item 9). Any format; normalized at use. Empty ⇒ the
   // reset-user tool refuses every request.
-  testerPhones: (process.env.TESTER_PHONES || '')
-    .split(',').map((s) => s.replace(/\D/g, '')).filter(Boolean)
-    .map((d) => (d.length === 10 ? '1' + d : d)),
+  testerPhones: parsePhoneList(process.env.TESTER_PHONES),
+
+  // Comma-separated allow-list of phone numbers the inbound SMS webhook will
+  // serve at all (routes/sms.js STAGE A2, private single-user mode). Same
+  // parsing as testerPhones — one normalizer, no second implementation.
+  // UNSET/EMPTY ⇒ DISARMED: every number is served, exactly as before this
+  // guard existed, and the route ANNOUNCES that mode on every single inbound
+  // (Lesson 7 — silence must never read as "checked and fine").
+  allowedPhones: parsePhoneList(process.env.ALLOWED_PHONES),
 
   // When true, the brief job composes + records but LOGS instead of sending via Twilio.
   // Lets you tune the brief before A2P registration completes.
