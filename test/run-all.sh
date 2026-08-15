@@ -86,6 +86,11 @@ echo "=== Bundle 35 — CONTRACTS: vendored package enforced on POST /api/goals 
 bun test/contracts-goals.test.mjs
 
 echo ""
+echo "=== Bundle 36 — SMS number allow-list (routes/sms.js STAGE A2) ==="
+# bun explicitly, not $RUNNER: the suite uses top-level await + dynamic import.
+bun test/sms-allowlist.test.mjs
+
+echo ""
 echo "=== contracts package: its own 97 tests + typecheck ==="
 # The vendored package carries its own suite. It needs its dev toolchain
 # (typescript, ajv), which is NOT committed, so this stage can only run where
