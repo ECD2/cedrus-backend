@@ -31,6 +31,20 @@ import { normalizePhone } from '../utils/phone.js';
 // ─────────────────────────────────────────────────────────────────────────
 
 /**
+ * Error code carried by the refusal sendSms() throws. Callers use it to tell a
+ * PERMANENT refusal apart from a TRANSIENT provider failure: every existing
+ * catch around sendSms reverts to a retryable state (pending / queued /
+ * accepted), which is right for Twilio being down and wrong for a number we
+ * will never send to — that would retry forever. Cancel on this code.
+ */
+export const OUTBOUND_REFUSED = 'not_allowlisted';
+
+/** Convenience wrapper for the job-level pre-checks. */
+export function outboundAllowed(phone, allowedPhones) {
+  return evaluateAllowlist(phone, allowedPhones).allowed;
+}
+
+/**
  * Pure allow-list decision.
  * @param {string} from  raw inbound `From` (Twilio sends E.164, e.g. "+1786…")
  * @param {string[]} allowedPhones  already-normalized digits-only entries

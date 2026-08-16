@@ -91,6 +91,11 @@ echo "=== Bundle 36 — SMS number allow-list (routes/sms.js STAGE A2) ==="
 bun test/sms-allowlist.test.mjs
 
 echo ""
+echo "=== Bundle 37 — OUTBOUND SMS allow-list (lib/twilio.js STAGE O) ==="
+# bun explicitly, not $RUNNER: the suite uses bun's mock.module.
+bun test/outbound-allowlist.test.mjs
+
+echo ""
 echo "=== contracts package: its own 97 tests + typecheck ==="
 # The vendored package carries its own suite. It needs its dev toolchain
 # (typescript, ajv), which is NOT committed, so this stage can only run where

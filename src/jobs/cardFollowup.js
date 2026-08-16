@@ -6,6 +6,7 @@ import * as messages from '../services/messages.js';
 import { localParts } from '../utils/time.js';
 import { isInSuppressionWindow } from '../services/safetyFlags.js';
 import { transitionCard, estimateSegments, CARD_WINDOW_START, CARD_WINDOW_END } from '../services/cards.js';
+import { OUTBOUND_REFUSED } from '../lib/smsAllowlist.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Card follow-up (night build 2026-07-28, item 2). Cron entry, hourly.
@@ -89,6 +90,11 @@ async function followupOne(card, now, jobId) {
   try {
     sent = await sendSms(user.phone, text);
   } catch (err) {
+    if (err?.code === OUTBOUND_REFUSED) {
+      await transitionCard(card.id, 'followup_sending', { status: 'canceled' });
+      logger.event('card.canceled', { job_id: jobId, user_ref: 'u_' + user.id, reason: 'not_allowlisted', outcome: 'canceled', message: `follow-up for card ${card.id} canceled: recipient not on ALLOWED_PHONES` });
+      return;
+    }
     await transitionCard(card.id, 'followup_sending', { status: 'accepted' }); // provably unsent → retry next tick
     logger.event('card.followup.send.failed', { level: 'error', job_id: jobId, user_ref: 'u_' + user.id, error_category: 'provider_error', outcome: 'error', message: `card ${card.id}: ${err?.message || String(err)} (reverted to accepted)` });
     return;

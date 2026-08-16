@@ -65,7 +65,7 @@ run_js "$(bundle test/reliability-core.js src/utils/logger.js test/logger.test.j
 
 # ── Bundle 3: reminder double-send / retryable failure (item 1) ─────────────
 section "reminder dispatch"
-run_js "$(bundle test/reliability-core.js test/reliability-stubs.js src/jobs/reminders.js test/reminders.test.js)"
+run_js "$(bundle test/reliability-core.js test/reliability-stubs.js src/utils/phone.js src/lib/smsAllowlist.js src/jobs/reminders.js test/reminders.test.js)"
 
 # ── Bundle 4: people ownership guard (item 3) ───────────────────────────────
 section "people ownership guard"
@@ -81,7 +81,7 @@ run_js "$(bundle test/reliability-core.js test/reliability-stubs.js src/jobs/wee
 
 # ── Bundle 7: Twilio signature hardening (item 4) ───────────────────────────
 section "twilio signature"
-run_js "$(bundle test/reliability-core.js test/prelude-twilio.js src/lib/twilio.js test/signature.test.js)"
+run_js "$(bundle test/reliability-core.js test/prelude-twilio.js src/utils/phone.js src/lib/smsAllowlist.js src/lib/twilio.js test/signature.test.js)"
 
 # ── Bundle 8: §6 suppression window — brief promo layer ─────────────────────
 section "brief §6 suppression"
@@ -287,7 +287,7 @@ run_js "$OUTBG"
 # cap; dry-run suppression (zero Twilio calls); send-time suppression re-check;
 # opted-out cancel; §6 hold; daytime window. time.js is real (localParts).
 section "card rail state machine"
-run_js "$(bundle test/reliability-core.js test/prelude-cards.js src/utils/time.js src/services/cards.js src/jobs/cardSender.js src/jobs/cardFollowup.js test/cards-state.test.js)"
+run_js "$(bundle test/reliability-core.js test/prelude-cards.js src/utils/time.js src/services/cards.js src/utils/phone.js src/lib/smsAllowlist.js src/jobs/cardSender.js src/jobs/cardFollowup.js test/cards-state.test.js)"
 
 # ── Bundle 31: card rail failure honesty (supabase never throws) ────────────
 # Programmable seam: read failures fall through (never block a real message);
@@ -314,7 +314,7 @@ run_js "$OUTCP"
 # (boundary pinned), the 1/ET-day cap, the 500-recipient refusal, opted-out
 # exclusion, dry-run = zero Twilio calls, kill-switch refusal, web feed.
 section "admin broadcasts"
-run_js "$(bundle test/reliability-core.js test/prelude-broadcasts.js src/utils/time.js src/services/broadcasts.js test/broadcasts.test.js)"
+run_js "$(bundle test/reliability-core.js test/prelude-broadcasts.js src/utils/time.js src/utils/phone.js src/lib/smsAllowlist.js src/services/broadcasts.js test/broadcasts.test.js)"
 
 # ── Bundle 34: web onboarding answers land in the facts/people layer ────────
 # Real onboardingAnswers.js + REAL memory.js (supersession) + REAL people.js
