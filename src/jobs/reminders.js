@@ -3,6 +3,7 @@ import { sendSms } from '../lib/twilio.js';
 import { config } from '../config.js';
 import { logger } from '../utils/logger.js';
 import * as messages from '../services/messages.js';
+import { OUTBOUND_REFUSED } from '../lib/smsAllowlist.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Reminder dispatch (WS-A item 1 — the double-send fix)
@@ -111,6 +112,17 @@ async function dispatchOne(reminder, jobId) {
   try {
     sent = await sendSms(user.phone, text);
   } catch (err) {
+    // A refusal is PERMANENT, not a provider blip: reverting to 'pending' would
+    // re-dispatch the same blocked number every tick forever. Cancel instead,
+    // exactly as an opted-out user is handled above.
+    if (err?.code === OUTBOUND_REFUSED) {
+      await setStatus(reminder.id, 'canceled');
+      logger.event('reminder.canceled', {
+        job_id: jobId, reminder_id: reminder.id, user_ref: userRef,
+        reason: 'not_allowlisted', outcome: 'skipped',
+      });
+      return;
+    }
     // Twilio threw before returning a SID ⇒ nothing was delivered ⇒ it is safe
     // to revert to 'pending' and retry next tick. This never double-sends.
     await setStatus(reminder.id, 'pending');

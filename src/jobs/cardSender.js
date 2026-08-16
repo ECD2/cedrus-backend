@@ -8,6 +8,7 @@ import { isInSuppressionWindow } from '../services/safetyFlags.js';
 // NOTE: single-line import — the concat rigs' strip removes only lines that
 // START with `import `, so a multi-line import leaves orphaned syntax behind.
 import { hasActiveSuppression, countRecentSends, transitionCard, estimateSegments, CARD_WEEKLY_CAP, CARD_WINDOW_START, CARD_WINDOW_END } from '../services/cards.js';
+import { OUTBOUND_REFUSED } from '../lib/smsAllowlist.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Card sender (night build 2026-07-28, item 2). Cron entry, every 15 min.
@@ -128,6 +129,13 @@ async function sendForUser(userId, cards, now, jobId) {
     try {
       sent = await sendSms(user.phone, card.body);
     } catch (err) {
+      if (err?.code === OUTBOUND_REFUSED) {
+        // Permanent refusal → cancel, same as the opted-out branch. Requeuing
+        // would retry a number we will never send to, on every tick.
+        await transitionCard(card.id, 'sending', { status: 'canceled' });
+        logger.event('card.canceled', { job_id: jobId, user_ref: 'u_' + userId, reason: 'not_allowlisted', outcome: 'canceled', message: `card ${card.id} canceled: recipient not on ALLOWED_PHONES` });
+        continue;
+      }
       // Provably not delivered → back to queued; the next tick retries.
       await transitionCard(card.id, 'sending', { status: 'queued' });
       logger.event('card.send.failed', { level: 'error', job_id: jobId, user_ref: 'u_' + userId, error_category: 'provider_error', outcome: 'error', message: `card ${card.id}: ${err?.message || String(err)} (reverted to queued)` });

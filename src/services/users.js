@@ -2,6 +2,19 @@ import { supabase } from '../lib/supabase.js';
 import { config } from '../config.js';
 import { timezoneFromPhone } from '../utils/time.js';
 import { normalizePhone } from '../utils/phone.js';
+import { outboundAllowed } from '../lib/smsAllowlist.js';
+
+// Drop recipients the outbound allow-list would refuse, at SELECTION time.
+//
+// sendSms() is the enforcement point and would refuse them anyway — but it
+// refuses AFTER the expensive work. Both loaders below feed jobs that compose
+// with an OpenAI call before they send, so filtering here is what stops a
+// blocked recipient from costing a model call (and, for the weekly brief, from
+// leaving a 'generated' row that the next hourly tick recomposes forever).
+// Disarmed ⇒ evaluateAllowlist allows everything ⇒ this is a no-op.
+function sendableOnly(rows) {
+  return (rows || []).filter((u) => outboundAllowed(u.phone, config.allowedPhones));
+}
 
 export async function findOrCreateByPhone(rawPhone) {
   // Fix C1: Twilio sends "+17869727469"; we store digits-only ("17869727469")
@@ -49,7 +62,7 @@ export async function listActiveForBrief() {
   const { data } = await supabase.from('app_users')
     .select('id, phone, name, timezone, brief_day, brief_time, plan, billing_status, opted_out, trial_ends_at')
     .eq('opted_out', false);
-  return data || [];
+  return sendableOnly(data);
 }
 
 export async function recordBriefSent(userId) {
@@ -65,5 +78,5 @@ export async function listNudgeable() {
   const { data } = await supabase.from('app_users')
     .select('id, phone, name, timezone, plan, billing_status, quiet_hours_start, quiet_hours_end, trial_ends_at')
     .eq('opted_out', false);
-  return data || [];
+  return sendableOnly(data);
 }

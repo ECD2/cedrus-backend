@@ -5,6 +5,7 @@ import { sendSms } from '../lib/twilio.js';
 import * as messages from './messages.js';
 import { localParts, localYMD } from '../utils/time.js';
 import { getBudgetGate } from './budget.js';
+import { outboundAllowed } from '../lib/smsAllowlist.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Admin broadcasts (night build 2026-07-28, item 3).
@@ -132,8 +133,18 @@ export async function approveBroadcast({ id, approvedBy, now = new Date() }) {
     bfail(422, 'daily_cap', `already sent ${sentToday} SMS broadcast(s) today (ET) — hard cap is ${BROADCAST_DAILY_CAP}/day`);
   }
 
-  const recipients = await resolveRecipients(row.segment);
-  if (recipients === null) bfail(500, 'recipients_unreadable', 'could not resolve the segment — refusing to send to an unknown set');
+  const resolved = await resolveRecipients(row.segment);
+  if (resolved === null) bfail(500, 'recipients_unreadable', 'could not resolve the segment — refusing to send to an unknown set');
+  // Outbound allow-list applied at SELECTION, before the count checks: a segment
+  // that resolves entirely to blocked numbers must refuse with no_recipients,
+  // not report a successful broadcast delivered to nobody.
+  const recipients = resolved.filter((u) => outboundAllowed(u.phone, config.allowedPhones));
+  if (resolved.length !== recipients.length) {
+    logger.event('broadcast.recipients.filtered', {
+      outcome: 'accepted', reason: 'not_allowlisted', count: resolved.length - recipients.length,
+      message: `${resolved.length - recipients.length} of ${resolved.length} recipient(s) dropped: not on ALLOWED_PHONES`,
+    });
+  }
   if (!recipients.length) bfail(422, 'no_recipients', 'the segment resolved to zero sendable users');
   if (recipients.length > BROADCAST_MAX_RECIPIENTS) {
     bfail(422, 'too_many_recipients', `segment resolves to ${recipients.length} recipients — hard cap is ${BROADCAST_MAX_RECIPIENTS}; split the segment`);
