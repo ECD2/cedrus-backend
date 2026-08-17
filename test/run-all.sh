@@ -96,6 +96,13 @@ echo "=== Bundle 37 — OUTBOUND SMS allow-list (lib/twilio.js STAGE O) ==="
 bun test/outbound-allowlist.test.mjs
 
 echo ""
+echo "=== Bundle 38 — CoS daily brief (compose / ledger / budget / delivery) ==="
+# bun explicitly, not $RUNNER: the suite uses top-level await + dynamic import
+# (config.js calls required() at module scope, so env must be set before the
+# imports evaluate — static imports are hoisted and would abort the suite).
+bun test/cos-daily-brief.test.mjs
+
+echo ""
 echo "=== contracts package: its own 97 tests + typecheck ==="
 # The vendored package carries its own suite. It needs its dev toolchain
 # (typescript, ajv), which is NOT committed, so this stage can only run where
