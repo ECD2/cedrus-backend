@@ -86,6 +86,29 @@ export const config = {
   briefEmailLive: process.env.BRIEF_EMAIL_LIVE === 'true',
   briefEmailLinkSecretSet: Boolean(process.env.BRIEF_EMAIL_LINK_SECRET),
   briefEmailSendgridKeySet: Boolean(process.env.BRIEF_EMAIL_SENDGRID_KEY),
+
+  // ── Chief of Staff daily brief (jobs/cosDailyBrief.js) ────────────────────
+  // Presence/mode only — the modules read process.env themselves so tests can
+  // inject an env object, and so no secret is copied into a second place.
+  //
+  // COS_ vars point at the CHIEF OF STAFF Supabase project (kpzyzjhfvjfvxowhusir),
+  // which is NOT this backend's project (qjwbtlnwnjjuvrwblkzx). They are
+  // deliberately not named SUPABASE_* : those are required() above and aim at
+  // Cedrus's own database, and a collision would silently point CoS reads at
+  // the wrong DB (Lesson 14 — take your own namespace).
+  //
+  // Reader DISARMED unless BOTH url and key are set. Delivery additionally
+  // requires COS_BRIEF_LIVE=true, RESEND_API_KEY and COS_BRIEF_TO. Every one of
+  // these defaults to off, and every mode is announced on each run.
+  cosSupabaseUrlSet: Boolean(process.env.COS_SUPABASE_URL),
+  cosServiceRoleKeySet: Boolean(process.env.COS_SERVICE_ROLE_KEY),
+  cosBriefArmed: Boolean(process.env.COS_SUPABASE_URL && process.env.COS_SERVICE_ROLE_KEY),
+  // Its OWN dry-run switch. Never BRIEF_DRY_RUN: that one is the SMS rail's and
+  // CEDRUS.md Law 5 reserves flipping it for a named arming session.
+  cosBriefDryRun: process.env.COS_BRIEF_DRY_RUN === 'true',
+  cosBriefLive: process.env.COS_BRIEF_LIVE === 'true',
+  cosBriefToSet: Boolean(process.env.COS_BRIEF_TO),
+  resendApiKeySet: Boolean(process.env.RESEND_API_KEY),
 };
 
 // ── Fail-closed boot checks for security-relevant config (items 4, A2/A12) ──
@@ -125,6 +148,33 @@ export function assertSecureBoot() {
     problems.push(
       'BRIEF_EMAIL_LIVE=true requires BRIEF_EMAIL_TRANSPORT=sendgrid and BRIEF_EMAIL_SENDGRID_KEY. ' +
       'Live email must be switched on explicitly and completely, or not at all.');
+  }
+
+  // CoS daily brief: a half-armed live sender is the dangerous state. Fully
+  // disarmed is fine and is the default; fully armed is a deliberate choice.
+  // "Live, but missing the recipient or the key" is neither, and it fails at
+  // 11:00 UTC in a log nobody is reading — so it dies at boot instead.
+  // Each message names the exact variable to set (Lesson 17).
+  if (isProduction && config.cosBriefLive && !config.resendApiKeySet) {
+    problems.push(
+      'COS_BRIEF_LIVE=true requires RESEND_API_KEY: the CoS daily brief cannot send without credentials. ' +
+      'Set the key or unset COS_BRIEF_LIVE.');
+  }
+  if (isProduction && config.cosBriefLive && !config.cosBriefToSet) {
+    problems.push(
+      'COS_BRIEF_LIVE=true requires COS_BRIEF_TO: there is deliberately no default recipient for the CoS ' +
+      'daily brief. Set the address or unset COS_BRIEF_LIVE.');
+  }
+  if (isProduction && config.cosBriefLive && !config.cosBriefArmed) {
+    problems.push(
+      'COS_BRIEF_LIVE=true requires COS_SUPABASE_URL and COS_SERVICE_ROLE_KEY: live delivery is armed but ' +
+      'the reader is disarmed, so there is nothing to send. Set both, or unset COS_BRIEF_LIVE.');
+  }
+  // Exactly one of the two reader credentials is always a mistake.
+  if (isProduction && config.cosSupabaseUrlSet !== config.cosServiceRoleKeySet) {
+    problems.push(
+      'COS_SUPABASE_URL and COS_SERVICE_ROLE_KEY must be set together. Exactly one is set, which leaves the ' +
+      'CoS reader disarmed while looking configured. Set both, or unset both.');
   }
 
   if (problems.length) {
