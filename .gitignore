@@ -5,3 +5,8 @@ npm-debug.log*
 .DS_Store
 bun.lock
 bun.lockb
+
+# Supabase CLI local state. .temp holds a pooler URL with credentials —
+# never commit it. migrations/ and config.toml ARE tracked on purpose.
+supabase/.temp/
+supabase/.branches/
