@@ -82,7 +82,7 @@ async function followupOne(card, now, jobId) {
   if (config.briefDryRun) {
     const msg = await messages.logOutbound({ userId: user.id, body: text, messageType: 'card_followup', providerStatus: 'dry_run', segments });
     await transitionCard(card.id, 'followup_sending', { status: 'followup_sent', followup_sent_at: now.toISOString(), followup_message_id: msg.id });
-    logger.event('card.followup.dry_run', { job_id: jobId, user_ref: 'u_' + user.id, message_type: 'card_followup', body_len: text.length, segments, outcome: 'sent', message: `card ${card.id}` });
+    logger.event('card.followup.dry_run', { job_id: jobId, user_ref: 'u_' + user.id, message_type: 'card_followup', body_len: text.length, segments, outcome: 'dry_run', message: `card ${card.id} follow-up rehearsed, not sent` });
     return;
   }
 

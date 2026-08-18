@@ -120,7 +120,9 @@ async function sendForUser(userId, cards, now, jobId) {
       // Never log the phone or the body (A8) — body_len only.
       const msg = await messages.logOutbound({ userId, body: card.body, messageType: 'card', providerStatus: 'dry_run', segments });
       await transitionCard(card.id, 'sending', { status: 'sent', sent_at: now.toISOString(), sent_message_id: msg.id });
-      logger.event('card.dry_run', { job_id: jobId, user_ref: 'u_' + userId, message_type: 'card', body_len: card.body.length, segments, outcome: 'sent', message: `card ${card.id}` });
+      // outcome 'dry_run', not 'sent': a rehearsal that reports outcome:'sent' is
+      // indistinguishable from a delivery in every log query.
+      logger.event('card.dry_run', { job_id: jobId, user_ref: 'u_' + userId, message_type: 'card', body_len: card.body.length, segments, outcome: 'dry_run', message: `card ${card.id} rehearsed, not sent` });
       sentCount++;
       continue;
     }
