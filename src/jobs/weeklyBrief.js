@@ -86,28 +86,56 @@ export async function sendBriefTo(user, now = new Date()) {
     providerStatus = sent?.status || 'queued';
   }
 
-  // Send confirmed (or dry-run). NOW it's safe to mark the brief sent.
+  // ── A REHEARSAL MUST RECORD A REHEARSAL ─────────────────────────────────
+  //
+  // Two different facts were being written by the same code path, and only one
+  // of them is true under BRIEF_DRY_RUN:
+  //
+  //   WORKFLOW STATE — "this week's brief has been dealt with". True either
+  //   way, and load-bearing: briefs.hasBriefForWeek() treats status 'sent' as
+  //   the re-dispatch guard (services/briefs.js:29), so a dry run that left the
+  //   row 'generated' would recompose and re-log the same brief every hour.
+  //   markSent() therefore still runs.
+  //
+  //   DELIVERY CLAIMS — "this reached a person". FALSE under dry run, and these
+  //   were being written anyway. app_users.total_briefs_sent is why a
+  //   non-allowlisted user reads total_briefs_sent=3 for messages that never
+  //   existed (lib/twilio.js:55).
+  //
+  // The rehearsal is still recorded, in the place that was already honest: the
+  // messages row carries provider_status='dry_run'. Nothing is lost by not
+  // lying in the other three.
+  const delivered = !config.briefDryRun;
+
   await briefs.markSent({ briefId: brief.id, summary: composed.text });
 
   const msg = await messages.logOutbound({
     userId: user.id, body: composed.text, messageType: 'weekly_brief',
     providerMessageId: providerId, segments, providerStatus,
   });
-  logger.event('brief.sent', {
+  logger.event(delivered ? 'brief.sent' : 'brief.rehearsed', {
     brief_id: brief.id, user_ref: 'u_' + user.id, provider_id: 'twilio',
     provider_message_id: providerId || undefined, message_type: 'weekly_brief',
-    body_len: composed.text.length, segments, outcome: 'sent',
+    body_len: composed.text.length, segments,
+    outcome: delivered ? 'sent' : 'dry_run',
   });
 
-  // ONE pending prompt for the closing question — keeps the reply matchable, and
-  // when they name someone, the inbound extraction turns it into a user_goal. The
-  // mid-week sweep follows up on that goal and is what fires the showing-up cascade.
-  await rel.openPendingPrompt({
-    userId: user.id, promptType: 'brief_goal',
-    questionText: plan.closingQuestion, sentMessageId: msg.id,
-  });
+  if (delivered) {
+    // ONE pending prompt for the closing question — keeps the reply matchable, and
+    // when they name someone, the inbound extraction turns it into a user_goal. The
+    // mid-week sweep follows up on that goal and is what fires the showing-up cascade.
+    //
+    // Gated on delivery: under dry run the closing question never reached anyone,
+    // so an open prompt would sit there waiting for a reply to a message that does
+    // not exist — and could then match an unrelated inbound message.
+    await rel.openPendingPrompt({
+      userId: user.id, promptType: 'brief_goal',
+      questionText: plan.closingQuestion, sentMessageId: msg.id,
+    });
 
-  await usersSvc.recordBriefSent(user.id);
+    // total_briefs_sent / last_brief_sent_at mean "delivered", nothing else.
+    await usersSvc.recordBriefSent(user.id);
+  }
   // (terminal outcome already logged above as brief.sent — one per unit of work)
 }
 

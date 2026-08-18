@@ -103,7 +103,7 @@ async function dispatchOne(reminder, jobId) {
       userId: user.id, body: text, messageType: 'reminder', providerStatus: 'dry_run',
     });
     await setStatus(reminder.id, 'sent', { sent_message_id: msg.id });
-    logger.event('reminder.dry_run', { job_id: jobId, reminder_id: reminder.id, user_ref: userRef, message_type: 'reminder', body_len: text.length, outcome: 'sent' });
+    logger.event('reminder.dry_run', { job_id: jobId, reminder_id: reminder.id, user_ref: userRef, message_type: 'reminder', body_len: text.length, outcome: 'dry_run' });
     return;
   }
 
