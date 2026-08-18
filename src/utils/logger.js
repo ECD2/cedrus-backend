@@ -77,6 +77,15 @@ function nowIso() { return new Date().toISOString(); }
 // Belt-and-braces pass over any free-form string that survives to `message`
 // or a `meta` string value. The primary defense is the field allow-list above;
 // this catches PII/secrets that slip into prose.
+// ISO 8601 date, optionally with a time, fractional seconds, and Z or ±hh:mm.
+// Deliberately anchored on the DATE half: that is the part whose hyphens the
+// phone regex mistakes for separators. A bare time ('20:25') is already safe
+// because ':' is not in the phone character class.
+const ISO_TIMESTAMP =
+  /\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?/g;
+const ISO_SENTINEL = '\uE000';
+const ISO_SENTINEL_RE = /\uE000/g;
+
 export function scrub(input) {
   if (typeof input !== 'string') return input;
   let s = input;
@@ -87,6 +96,27 @@ export function scrub(input) {
   s = s.replace(/\bSG\.[A-Za-z0-9_.-]{12,}/g, '[secret]'); // SendGrid
   s = s.replace(/\b(?:AC|SK)[0-9a-fA-F]{32}\b/g, '[secret]'); // Twilio SID/key
   s = s.replace(/\beyJ[A-Za-z0-9_-]{6,}\b/g, '[secret]');  // lone JWT-ish
+  // ── ISO timestamps are masked BEFORE the phone pass, then restored ────────
+  //
+  // The phone regex treats '-' as an internal separator, so '2026-08-15' reads
+  // as one eight-digit number and became '[phone:0815]'. Real observed damage:
+  // job ids logged as 'reminder-dispatch:[phone:0815]T20:25Z' and a brief
+  // subject as 'Cedrus daily brief — [phone:0817] —'.
+  //
+  // Masking is used rather than a negative lookbehind such as (?<![\d-]).
+  // A lookbehind that refuses to start a match after a digit or hyphen also
+  // refuses to redact a genuine number written as 'call-7869727469' — and a
+  // false negative here LEAKS A PHONE NUMBER, while a false positive only
+  // mangles a date. The two errors are not symmetric, so the fix must not trade
+  // one for the other. Masking removes dates from consideration entirely and
+  // leaves every phone shape reachable.
+  //
+  // The sentinel is a Unicode private-use character: it contains no digits (so
+  // it cannot itself be read as a number), it is one code unit (so offsets stay
+  // simple), and it does not occur in real log text.
+  const isoStash = [];
+  s = s.replace(ISO_TIMESTAMP, (m) => { isoStash.push(m); return ISO_SENTINEL; });
+
   // Phone numbers → last 4 only. Matches E.164 and loosely-formatted numbers
   // with >=7 digits; keeps short numerics (segment counts, ids) intact.
   s = s.replace(/\+?\d[\d\-\s().]{5,}\d/g, (m) => {
@@ -94,6 +124,11 @@ export function scrub(input) {
     if (digits.length < 7 || digits.length > 15) return m;
     return '[phone:' + digits.slice(-4) + ']';
   });
+
+  // Restore in the order they were taken. shift() pairs with push() above; if
+  // the stash ever ran dry the sentinel would be left visible rather than
+  // silently swallowing text.
+  s = s.replace(ISO_SENTINEL_RE, () => (isoStash.length ? isoStash.shift() : ISO_SENTINEL));
   return s;
 }
 
