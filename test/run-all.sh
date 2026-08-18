@@ -13,6 +13,15 @@ if command -v bun >/dev/null 2>&1; then RUNNER="bun"
 elif command -v node >/dev/null 2>&1; then RUNNER="node"
 else echo "need bun or node to run the safety/voice/search suites"; exit 1; fi
 
+# Repo integrity FIRST. A NUL byte makes git treat a text file as binary, so
+# `git diff` shows "Bin N -> M bytes" and no content — the file silently leaves
+# code review. Happened twice on 2026-08-17. This gates everything else because
+# it is a property of the tree, not of any one suite, and because a repo in that
+# state should not report a green battery.
+echo "=== repo integrity — NUL bytes ==="
+sh test/no-nul-bytes.sh
+
+echo ""
 echo "=== fact pipeline (real memory.js/persist.js, dependency-free rig) ==="
 sh test/run-tests.sh
 
