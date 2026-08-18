@@ -52,7 +52,7 @@ process.env.TWILIO_FROM_NUMBER = '+15550000000';
 // abort the suite with "missing required env var SUPABASE_URL". Bundles 36 and
 // 37 hit the same wall and solved it the same way; this is why the run-all.sh
 // registration says "bun explicitly" — top-level await needs it.
-const { runCosDailyBrief, isDryRun, briefModel } = await import('../src/jobs/cosDailyBrief.js');
+const { runCosDailyBrief, isDryRun, isWritebackOnly, briefMode, briefModel } = await import('../src/jobs/cosDailyBrief.js');
 const { guard, JOB_REGISTRY } = await import('../src/jobs/scheduler.js');
 const compose = await import('../src/services/cos/compose.js');
 const ledger = await import('../src/services/cos/ledger.js');
@@ -170,6 +170,23 @@ function makeDeps({ data = rawData(), brief = null, db = fakeDb(), modelThrows =
 }
 
 const reset = () => { sends = []; };
+
+// Capture what the job ANNOUNCES. The mode line is a product surface here, not
+// decoration: it is how a human knows which rung they are standing on, and
+// Lesson 7 is precisely about a guard that cannot say which mode it ran in.
+// logger.emit() routes through console.log / warn / error, so all three are
+// intercepted.
+async function captureLogs(fn) {
+  const lines = [];
+  const orig = { log: console.log, warn: console.warn, error: console.error };
+  const grab = (x) => { lines.push(String(x)); };
+  console.log = grab; console.warn = grab; console.error = grab;
+  try { await fn(); } finally { Object.assign(console, orig); }
+  return lines
+    .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    .filter(Boolean);
+}
+const eventNamed = (evts, name) => evts.find((e) => e.event === name) || null;
 
 // ═══════════════════════════════════════════════════════════════════════════
 section('DISARMED — the default state sends nothing');
@@ -481,6 +498,103 @@ section('dry run composes but does not send, write, or consume the day');
   ok('dry run sent NOTHING', sends.length === 0, sends.length);
   ok('dry run wrote NOTHING back to CoS', written.length === 0, written.length);
   ok('dry run did NOT consume the day\'s ledger slot', db.rows.size === 0, [...db.rows.keys()]);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section('WRITEBACK-ONLY — the rung that proves the CoS insert without sending');
+{
+  reset();
+  const db = fakeDb();
+  const { deps, written } = makeDeps({ brief: briefCiting([{ type: 'email_message', id: IDS.mail }]), db });
+  const env = { ...ARMED_ENV, COS_BRIEF_WRITEBACK_ONLY: 'true' };
+
+  let r;
+  const events = await captureLogs(async () => {
+    r = await runCosDailyBrief({ env, now: new Date('2026-08-17T11:00:00Z'), deps });
+  });
+  ok('writeback-only ANNOUNCES its mode by name',
+    (eventNamed(events, 'cos.delivery.mode') || {}).outcome === 'writeback_only',
+    eventNamed(events, 'cos.delivery.mode'));
+  ok('writeback-only DID write the row to CoS', written.length === 1 && r.written === true, r);
+  ok('writeback-only sent NOTHING', sends.length === 0, sends.length);
+  ok('writeback-only reports its own mode', r.reason === 'writeback_only', r.reason);
+  ok('writeback-only did NOT claim the day\'s send slot', db.rows.size === 0, [...db.rows.keys()]);
+  ok('the row it wrote is a real brief, not a placeholder',
+    written[0].brief.schema_version === 'today_brief_v1' && written[0].brief.top_priorities.length === 1);
+
+  // THE POINT OF THE RUNG: a failing writeback is caught here, with no email
+  // sent and no ledger row — i.e. on a run where the failure is free.
+  reset();
+  const failDb = fakeDb();
+  const failing = makeDeps({ brief: briefCiting([{ type: 'open_loop', id: IDS.loop }]), db: failDb });
+  failing.deps.write = async () => ({ id: null, skipped: true, reason: 'write_failed' });
+  const rf = await runCosDailyBrief({ env, now: new Date('2026-08-17T11:00:00Z'), deps: failing.deps });
+  ok('a FAILING writeback is reported, not swallowed', rf.written === false && rf.reason === 'writeback_only', rf);
+  ok('a failing writeback sent no email', sends.length === 0, sends.length);
+  ok('a failing writeback left no ledger row to unstick', failDb.rows.size === 0, [...failDb.rows.keys()]);
+
+  // Precedence, both directions. These are the rules most likely to rot.
+  ok('DRY_RUN wins over WRITEBACK_ONLY (the safer mode wins)',
+    isDryRun({ COS_BRIEF_DRY_RUN: 'true', COS_BRIEF_WRITEBACK_ONLY: 'true' }) === true);
+  reset();
+  const bothDb = fakeDb();
+  const both = makeDeps({ brief: briefCiting([{ type: 'open_loop', id: IDS.loop }]), db: bothDb });
+  let rb;
+  const bothEvents = await captureLogs(async () => {
+    rb = await runCosDailyBrief({
+      env: { ...ARMED_ENV, COS_BRIEF_DRY_RUN: 'true', COS_BRIEF_WRITEBACK_ONLY: 'true' },
+      now: new Date('2026-08-17T11:00:00Z'), deps: both.deps,
+    });
+  });
+  ok('both flags set ⇒ DRY RUN, so nothing is written', rb.reason === 'dry_run' && both.written.length === 0, rb);
+  ok('both flags set ⇒ nothing sent', sends.length === 0, sends.length);
+  // The behaviour above is decided by statement ORDER (the dry-run branch
+  // returns first), so `reason` alone cannot catch a broken precedence rule in
+  // the mode variable. The ANNOUNCED mode can, and a log that names the wrong
+  // rung is its own defect.
+  ok('both flags set ⇒ the job ANNOUNCES dry_run, not writeback_only',
+    (eventNamed(bothEvents, 'cos.delivery.mode') || {}).outcome === 'dry_run',
+    eventNamed(bothEvents, 'cos.delivery.mode'));
+
+  // WRITEBACK_ONLY must beat LIVE — the rung has to stay safe if the live flag
+  // is set early, which is precisely the mistake it exists to catch.
+  reset();
+  const liveDb = fakeDb();
+  const withLive = makeDeps({ brief: briefCiting([{ type: 'open_loop', id: IDS.loop }]), db: liveDb });
+  const rl = await runCosDailyBrief({
+    env: { ...ARMED_ENV, COS_BRIEF_LIVE: 'true', COS_BRIEF_WRITEBACK_ONLY: 'true' },
+    now: new Date('2026-08-17T11:00:00Z'), deps: withLive.deps,
+  });
+  ok('WRITEBACK_ONLY overrides a live flag set early', rl.reason === 'writeback_only' && rl.sent === false, rl);
+  ok('...and ZERO email left the wire despite COS_BRIEF_LIVE=true', sends.length === 0, sends.length);
+  ok('...and the row was still written', withLive.written.length === 1);
+
+  ok('isWritebackOnly reads its own flag', isWritebackOnly({ COS_BRIEF_WRITEBACK_ONLY: 'true' }) === true
+    && isWritebackOnly({}) === false && isWritebackOnly({ COS_BRIEF_LIVE: 'true' }) === false);
+
+  // briefMode() is the ONE place precedence lives. Pin the whole table: an
+  // earlier shape encoded this three times over and no mutation could reach it.
+  const LIVE3 = { COS_BRIEF_LIVE: 'true', RESEND_API_KEY: 'k', COS_BRIEF_TO: 'a@b.test' };
+  ok('mode: nothing set ⇒ not_configured', briefMode({}) === 'not_configured', briefMode({}));
+  ok('mode: full delivery ⇒ live', briefMode(LIVE3) === 'live', briefMode(LIVE3));
+  ok('mode: writeback flag ⇒ writeback_only', briefMode({ COS_BRIEF_WRITEBACK_ONLY: 'true' }) === 'writeback_only');
+  ok('mode: dry-run flag ⇒ dry_run', briefMode({ COS_BRIEF_DRY_RUN: 'true' }) === 'dry_run');
+  ok('mode: dry_run BEATS writeback_only',
+    briefMode({ COS_BRIEF_DRY_RUN: 'true', COS_BRIEF_WRITEBACK_ONLY: 'true' }) === 'dry_run');
+  ok('mode: dry_run BEATS live',
+    briefMode({ ...LIVE3, COS_BRIEF_DRY_RUN: 'true' }) === 'dry_run');
+  ok('mode: writeback_only BEATS live',
+    briefMode({ ...LIVE3, COS_BRIEF_WRITEBACK_ONLY: 'true' }) === 'writeback_only');
+  ok('mode: all three flags ⇒ the SAFEST one wins',
+    briefMode({ ...LIVE3, COS_BRIEF_DRY_RUN: 'true', COS_BRIEF_WRITEBACK_ONLY: 'true' }) === 'dry_run');
+
+  // CONTROL: with neither flag, the same fixture DOES send. Without this, every
+  // "sent nothing" above could be an artifact of a broken fixture.
+  reset();
+  const ctrlDb = fakeDb();
+  const ctrl = makeDeps({ brief: briefCiting([{ type: 'open_loop', id: IDS.loop }]), db: ctrlDb });
+  await runCosDailyBrief({ env: ARMED_ENV, now: new Date('2026-08-17T11:00:00Z'), deps: ctrl.deps });
+  ok('CONTROL: the same fixture with no mode flag DOES send', sends.length === 1, sends.length);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

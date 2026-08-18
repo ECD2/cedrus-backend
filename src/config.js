@@ -106,6 +106,10 @@ export const config = {
   // Its OWN dry-run switch. Never BRIEF_DRY_RUN: that one is the SMS rail's and
   // CEDRUS.md Law 5 reserves flipping it for a named arming session.
   cosBriefDryRun: process.env.COS_BRIEF_DRY_RUN === 'true',
+  // The rung between rehearsing and going live: compose AND write the row
+  // into CoS, but send nothing. Overrides cosBriefLive, so setting the live
+  // flag early cannot turn this rung into a real send.
+  cosBriefWritebackOnly: process.env.COS_BRIEF_WRITEBACK_ONLY === 'true',
   cosBriefLive: process.env.COS_BRIEF_LIVE === 'true',
   cosBriefToSet: Boolean(process.env.COS_BRIEF_TO),
   resendApiKeySet: Boolean(process.env.RESEND_API_KEY),
@@ -155,17 +159,20 @@ export function assertSecureBoot() {
   // "Live, but missing the recipient or the key" is neither, and it fails at
   // 11:00 UTC in a log nobody is reading — so it dies at boot instead.
   // Each message names the exact variable to set (Lesson 17).
-  if (isProduction && config.cosBriefLive && !config.resendApiKeySet) {
+  // Writeback-only suppresses sending entirely, so a live flag set alongside it
+  // is not a half-armed sender and must not fail the boot.
+  const liveWillSend = config.cosBriefLive && !config.cosBriefWritebackOnly && !config.cosBriefDryRun;
+  if (isProduction && liveWillSend && !config.resendApiKeySet) {
     problems.push(
       'COS_BRIEF_LIVE=true requires RESEND_API_KEY: the CoS daily brief cannot send without credentials. ' +
       'Set the key or unset COS_BRIEF_LIVE.');
   }
-  if (isProduction && config.cosBriefLive && !config.cosBriefToSet) {
+  if (isProduction && liveWillSend && !config.cosBriefToSet) {
     problems.push(
       'COS_BRIEF_LIVE=true requires COS_BRIEF_TO: there is deliberately no default recipient for the CoS ' +
       'daily brief. Set the address or unset COS_BRIEF_LIVE.');
   }
-  if (isProduction && config.cosBriefLive && !config.cosBriefArmed) {
+  if (isProduction && liveWillSend && !config.cosBriefArmed) {
     problems.push(
       'COS_BRIEF_LIVE=true requires COS_SUPABASE_URL and COS_SERVICE_ROLE_KEY: live delivery is armed but ' +
       'the reader is disarmed, so there is nothing to send. Set both, or unset COS_BRIEF_LIVE.');

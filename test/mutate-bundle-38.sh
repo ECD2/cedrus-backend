@@ -203,6 +203,40 @@ mutate "the job reads BRIEF_DRY_RUN instead of its own flag" \
   "return env.BRIEF_DRY_RUN === 'true';"
 
 echo ""
+echo "-- guard 11: the writeback-only rung --"
+mutate "writeback-only sends anyway" \
+  src/jobs/cosDailyBrief.js \
+  "  if (writebackOnly) {" \
+  "  if (false) {"
+mutate "writeback-only does not actually write" \
+  src/jobs/cosDailyBrief.js \
+  "    const wroteOnly = await write({" \
+  "    const wroteOnly = { id: null, skipped: true, reason: 0 }; const _unused = ({"
+mutate "precedence flipped: writeback_only checked before dry_run" \
+  src/jobs/cosDailyBrief.js \
+  "  if (isDryRun(env)) return 'dry_run';
+  if (isWritebackOnly(env)) return 'writeback_only';" \
+  "  if (isWritebackOnly(env)) return 'writeback_only';
+  if (isDryRun(env)) return 'dry_run';"
+mutate "precedence flipped: live checked before writeback_only" \
+  src/jobs/cosDailyBrief.js \
+  "  if (isWritebackOnly(env)) return 'writeback_only';
+  return deliveryEnv(env).ready ? 'live' : 'not_configured';" \
+  "  if (deliveryEnv(env).ready) return 'live';
+  return isWritebackOnly(env) ? 'writeback_only' : 'not_configured';"
+mutate "writeback-only claims the send ledger it must not touch" \
+  src/jobs/cosDailyBrief.js \
+  "  if (writebackOnly) {
+    const wroteOnly = await write({" \
+  "  if (writebackOnly) {
+    await claim({ now });
+    const wroteOnly = await write({"
+mutate "a failed writeback is reported as success" \
+  src/jobs/cosDailyBrief.js \
+  "      written: !wroteOnly.skipped, briefId: wroteOnly.id || null, brief," \
+  "      written: true, briefId: wroteOnly.id || null, brief,"
+
+echo ""
 echo "-- guard 10: renderer safety --"
 mutate "model output is no longer HTML-escaped" \
   src/services/cos/renderer.js \
