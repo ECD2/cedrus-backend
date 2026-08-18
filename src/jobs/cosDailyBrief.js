@@ -11,15 +11,28 @@
 // migration. CoS's deliberate "never acts autonomously" posture is intact;
 // Cedrus is the system that acts, and it reads CoS's database directly.
 //
-// ── FIVE INDEPENDENT SWITCHES, ALL DEFAULT-OFF ──────────────────────────────
-//   COS_SUPABASE_URL + COS_SERVICE_ROLE_KEY  reader armed (else DISARMED)
-//   COS_BRIEF_DRY_RUN=true                   compose + log, no send, no writeback
-//   COS_BRIEF_LIVE=true                      live email permitted
-//   RESEND_API_KEY                           credentials
-//   COS_BRIEF_TO                             explicit recipient, no default
+// ── THE FOUR MODES, MOST CONSERVATIVE FIRST ─────────────────────────────────
+//   1. DISARMED          COS_SUPABASE_URL / COS_SERVICE_ROLE_KEY unset.
+//                        Reads nothing, composes nothing, sends nothing.
+//   2. DRY RUN           COS_BRIEF_DRY_RUN=true. Composes and logs. No email,
+//                        no writeback, no ledger claim. Makes a real billable
+//                        model call.
+//   3. WRITEBACK-ONLY    COS_BRIEF_WRITEBACK_ONLY=true. Composes AND writes the
+//                        row into CoS. Still no email, still no ledger claim.
+//                        Overrides COS_BRIEF_LIVE.
+//   4. LIVE              COS_BRIEF_LIVE=true + RESEND_API_KEY + COS_BRIEF_TO.
+//                        Sends, then writes back.
 //
-// Nothing reaches a person until ALL of them are set. Unsetting any one of them
-// stops delivery.
+// Mode 3 exists because of the ORDER inside mode 4: send first, write second.
+// A writeback that fails on its first real attempt would do so AFTER the email
+// left and AFTER the ledger said 'sent' — and the fail-closed ledger then
+// correctly refuses to retry that day. So the owner would get an email, see
+// nothing in the app, and have no recourse. Mode 3 moves that first real
+// attempt to a run where failing is free. It is also the only operation in
+// this entire job that touches Chief of Staff's production data.
+//
+// Nothing reaches a person until mode 4's three variables are ALL set. Unsetting
+// any one of them stops delivery.
 //
 // ── WHY ITS OWN DRY-RUN FLAG ────────────────────────────────────────────────
 // BRIEF_DRY_RUN is the SMS rail's switch and CEDRUS.md Law 5 reserves flipping
@@ -68,6 +81,57 @@ export function isDryRun(env = process.env) {
 }
 
 /**
+ * Writeback-only: compose, write the row into CoS, send NOTHING.
+ *
+ * This exists because of the ORDER of the live path. Delivery sends first and
+ * writes second, so if the writeback fails on its first ever real attempt — a
+ * drifted column, a CHECK we read wrong, an unresolvable owner id — the email
+ * has already gone, the ledger already says 'sent', and the fail-closed design
+ * correctly refuses to retry that day. The owner gets a brief in their inbox,
+ * sees nothing in the app, and has no recourse until tomorrow.
+ *
+ * The writeback is also the ONLY operation in this whole job that touches
+ * Chief of Staff's production data, and it is the least verified thing here:
+ * it has never run against the real database. Giving the least-verified,
+ * highest-consequence operation its own rung means it can fail on a day when
+ * failing is free.
+ *
+ * Precedence, both directions deliberate:
+ *   • COS_BRIEF_DRY_RUN wins over this — it is the more conservative mode, so
+ *     setting both gets you the safer one, not a surprise write.
+ *   • This wins over COS_BRIEF_LIVE — the rung must stay safe even if someone
+ *     sets the live flag early, which is exactly the mistake it guards.
+ *
+ * It does NOT claim the send ledger: nothing goes on the wire, so it must not
+ * consume the day's send slot. One consequence worth knowing: each run inserts
+ * one today_briefs row, so repeated runs leave repeated rows. That is the point
+ * (it proves the insert really works) and it is reversible with a delete.
+ */
+export function isWritebackOnly(env = process.env) {
+  return env.COS_BRIEF_WRITEBACK_ONLY === 'true';
+}
+
+/**
+ * Which of the four modes is in force. THE SINGLE SOURCE OF PRECEDENCE.
+ *
+ * Written as one ordered function after a mutation run proved the previous
+ * shape untestable: precedence had been encoded three times over (a `!dryRun`
+ * in the mode variable, the order of a ternary, and the order of the early
+ * returns), so breaking any one of them changed nothing observable and the
+ * suite stayed green. Redundant guards are not extra safety — they are guards
+ * no test can hold, and they rot silently.
+ *
+ * Order is the rule: the more conservative mode always wins, so setting two
+ * flags gets the safer one. Swapping two lines here is a real behaviour change
+ * and Bundle 38 catches it.
+ */
+export function briefMode(env = process.env) {
+  if (isDryRun(env)) return 'dry_run';
+  if (isWritebackOnly(env)) return 'writeback_only';
+  return deliveryEnv(env).ready ? 'live' : 'not_configured';
+}
+
+/**
  * Entry point. The scheduler is the only caller.
  *
  * Returns a small result object (used by the tests and readable in logs); the
@@ -89,16 +153,25 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
   const mode = announceCosMode(env);
   if (!mode.armed) return { ran: false, reason: 'disarmed', sent: false, written: false };
 
-  const dryRun = isDryRun(env);
+  // Four modes, most conservative first. Exactly one is in force per run and
+  // the chosen one is named in the log, so "which rung am I on?" is never a
+  // guess (Lesson 7).
   const delivery = deliveryEnv(env);
-  logger.event('cos.delivery.mode', {
-    outcome: dryRun ? 'dry_run' : (delivery.ready ? 'live' : 'not_configured'),
-    message: dryRun
-      ? 'COS_BRIEF_DRY_RUN=true — the brief will be composed and logged. No email, no writeback.'
-      : (delivery.ready
-        ? 'delivery LIVE — a composed brief will be emailed and written back to CoS'
-        : `delivery NOT CONFIGURED — missing: ${delivery.missing.join(', ')}. The brief will be composed and logged only.`),
-  });
+  const modeName = briefMode(env);
+  const dryRun = modeName === 'dry_run';
+  const writebackOnly = modeName === 'writeback_only';
+  const modeMessage = {
+    dry_run:
+      'COS_BRIEF_DRY_RUN=true — the brief will be composed and logged. No email, no writeback, no ledger claim.',
+    writeback_only:
+      'COS_BRIEF_WRITEBACK_ONLY=true — the brief will be composed and WRITTEN BACK to CoS today_briefs. ' +
+      'No email, no ledger claim. This overrides COS_BRIEF_LIVE.',
+    live:
+      'delivery LIVE — a composed brief will be emailed and written back to CoS',
+    not_configured:
+      `delivery NOT CONFIGURED — missing: ${delivery.missing.join(', ')}. The brief will be composed and logged only.`,
+  }[modeName];
+  logger.event('cos.delivery.mode', { outcome: modeName, message: modeMessage });
 
   // ── gather, failing closed on any unreadable table ────────────────────────
   const gathered = await gather({ now, env });
@@ -167,6 +240,40 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
       message: 'DRY RUN — a brief was composed and rendered. Not sent, not written back.',
     });
     return { ran: true, reason: 'dry_run', sent: false, written: false, brief };
+  }
+
+  // ── writeback-only stops here, having proven the CoS insert ───────────
+  //
+  // The rung between "rehearsed" and "live". It exercises the one operation
+  // that writes to Chief of Staff's production database, on a run where a
+  // failure costs nothing: no email has gone out, so there is nothing to be
+  // inconsistent with, and no ledger row to unstick.
+  if (writebackOnly) {
+    const wroteOnly = await write({
+      brief, minimizedInput: minimized, model: result.model || model,
+      latencyMs, tokens: totalTokens(result.usage), env, now,
+    });
+    if (wroteOnly.skipped) {
+      logger.event('cos.brief.writeback_only', {
+        level: 'error', error_category: 'db_error', outcome: wroteOnly.reason,
+        message:
+          `WRITEBACK-ONLY FAILED (${wroteOnly.reason}) — nothing was written to CoS. ` +
+          'Fix this before setting COS_BRIEF_LIVE: on the live path the email is sent BEFORE the ' +
+          'writeback, so this same failure would arrive as a brief in your inbox that never appears in the app.',
+      });
+    } else {
+      logger.event('cos.brief.writeback_only', {
+        outcome: 'written',
+        priorities: brief.top_priorities.length,
+        cited_records: countRefs(brief),
+        message: 'WRITEBACK-ONLY — a brief was written to CoS today_briefs and should now be visible ' +
+          'in the Chief of Staff app. No email was sent, and the day\'s send slot is untouched.',
+      });
+    }
+    return {
+      ran: true, reason: 'writeback_only', sent: false,
+      written: !wroteOnly.skipped, briefId: wroteOnly.id || null, brief,
+    };
   }
 
   // ── delivery ──────────────────────────────────────────────────────────────
