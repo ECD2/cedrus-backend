@@ -294,6 +294,106 @@
   r = await handleCardReply({ user, body: 'NO', now: T0 });
   check('"NO" is follow-up vocab, not card vocab → falls through on a sent card', r.handled === false && __rows('opportunity_cards')[0].status === 'sent');
 
+  println('\n── CAS: the compare-and-set that prevents a double send ──');
+  // Added 2026-08-18 after a dead-guard audit found this mechanism UNFALSIFIED.
+  // Three independent mutations — deleting .eq('status', fromStatus), making
+  // transitionCard always return true, and making cardSender ignore a lost
+  // claim — each left the whole battery GREEN. Every existing card test drives
+  // the happy path, so nothing ever observed a claim being REFUSED.
+  //
+  // The CAS is not dead: against real Postgres it is the only thing stopping
+  // two overlapping ticks from sending the same card twice. It was simply
+  // never tested on the branch that matters. These assertions fix that.
+
+  // A card that is no longer 'queued' must NOT be claimable from 'queued'.
+  seedBase();
+  __seed('opportunity_cards', [cardRow({ id: 'card_cas1', status: 'sending' })]);
+  let claimed = await transitionCard('card_cas1', 'queued', { status: 'sending' });
+  check('CAS refuses a claim when the row is not in the expected state', claimed === false, String(claimed));
+  check('CAS refusal leaves the row untouched',
+    __db.opportunity_cards[0].status === 'sending', __db.opportunity_cards[0].status);
+
+  // CONTROL: the same call from the correct state succeeds. Without this, a
+  // transitionCard that always returned false would satisfy the assertion above.
+  seedBase();
+  __seed('opportunity_cards', [cardRow({ id: 'card_cas2', status: 'queued' })]);
+  claimed = await transitionCard('card_cas2', 'queued', { status: 'sending' });
+  check('CONTROL: CAS succeeds from the expected state', claimed === true, String(claimed));
+  check('CONTROL: the row really moved', __db.opportunity_cards[0].status === 'sending');
+
+  // Two claims, one winner — the double-send guarantee itself.
+  seedBase();
+  __seed('opportunity_cards', [cardRow({ id: 'card_cas3', status: 'queued' })]);
+  const both = await Promise.all([
+    transitionCard('card_cas3', 'queued', { status: 'sending' }),
+    transitionCard('card_cas3', 'queued', { status: 'sending' }),
+  ]);
+  check('exactly ONE of two concurrent claims wins', both.filter(Boolean).length === 1, JSON.stringify(both));
+
+  // A card already in flight is never picked up at all — the QUERY excludes it.
+  // This covers the selection filter, not the CAS.
+  seedBase();
+  __seed('opportunity_cards', [cardRow({ id: 'card_cas4', status: 'sending' })]);
+  __sentSms.length = 0;
+  await runCardSender(IN_WINDOW);
+  check('a card already in flight is never selected', __sentSms.length === 0, JSON.stringify(__sentSms));
+
+  // And the job HONOURS a refused claim. Reaching that branch needs a card the
+  // query selects but the CAS then refuses, which a single-threaded fake cannot
+  // produce naturally — the query is .eq('status','queued') and the claim that
+  // follows always wins.
+  //
+  // Two rows sharing an id makes transitionCard's update match both, so
+  // `data.length === 1` is false and it reports a LOST CLAIM. Postgres cannot
+  // hold that state, but the SIGNAL the job consumes — transitionCard returning
+  // false — is byte-identical to the one a real concurrent tick produces, and
+  // that signal is the entire contract of the line under test.
+  seedBase();
+  // __resetCards() inside seedBase sets config.briefDryRun = TRUE
+  // (prelude-cards.js:47). Leaving it there made this assertion pass for the
+  // wrong reason: the dry-run branch stopped the send, not the refused claim,
+  // and a mutation deleting `if (!claimed) continue;` stayed GREEN. Turn it off
+  // so the wire is what is actually being measured.
+  config.briefDryRun = false;
+  __seed('opportunity_cards', [
+    cardRow({ id: 'card_cas5', status: 'queued' }),
+    cardRow({ id: 'card_cas5', status: 'queued' }),
+  ]);
+  __sentSms.length = 0;
+  await runCardSender(IN_WINDOW);
+  check('a REFUSED claim means the job sends nothing', __sentSms.length === 0, JSON.stringify(__sentSms));
+
+  // CONTROL: identical setup with ONE row — the claim succeeds and the card
+  // really is sent. Without this, the assertion above would also pass if
+  // runCardSender were broken and never sent anything at all.
+  seedBase();
+  config.briefDryRun = false;
+  __seed('opportunity_cards', [cardRow({ id: 'card_cas6', status: 'queued' })]);
+  __sentSms.length = 0;
+  await runCardSender(IN_WINDOW);
+  check('CONTROL: a single claimable card IS sent', __sentSms.length === 1, JSON.stringify(__sentSms));
+  config.briefDryRun = true;
+
+  // Same gap, same shape, in the FOLLOW-UP path: cardFollowup.js has its own
+  // `if (!claimed) return;` and a mutation deleting it was also silent.
+  seedBase();
+  config.briefDryRun = false;
+  __seed('opportunity_cards', [
+    cardRow({ id: 'card_cas7', status: 'accepted', followup_due_at: '2026-07-29T00:00:00.000Z' }),
+    cardRow({ id: 'card_cas7', status: 'accepted', followup_due_at: '2026-07-29T00:00:00.000Z' }),
+  ]);
+  __sentSms.length = 0;
+  await runCardFollowup(IN_WINDOW);
+  check('follow-up: a REFUSED claim means nothing is sent', __sentSms.length === 0, JSON.stringify(__sentSms));
+
+  seedBase();
+  config.briefDryRun = false;
+  __seed('opportunity_cards', [cardRow({ id: 'card_cas8', status: 'accepted', followup_due_at: '2026-07-29T00:00:00.000Z' })]);
+  __sentSms.length = 0;
+  await runCardFollowup(IN_WINDOW);
+  check('CONTROL: a single claimable follow-up IS sent', __sentSms.length === 1, JSON.stringify(__sentSms));
+  config.briefDryRun = true;
+
   println('');
   const f = done();
   println(f === 0 ? 'ALL CARD-STATE TESTS PASSED' : f + ' TEST(S) FAILED');
