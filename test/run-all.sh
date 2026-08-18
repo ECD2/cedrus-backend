@@ -112,6 +112,11 @@ echo "=== Bundle 38 — CoS daily brief (compose / ledger / budget / delivery) =
 bun test/cos-daily-brief.test.mjs
 
 echo ""
+echo "=== Bundle 39 — logger.scrub: ISO timestamps vs phone redaction ==="
+# bun explicitly, not $RUNNER: top-level await + dynamic import.
+bun test/scrub-timestamps.test.mjs
+
+echo ""
 echo "=== contracts package: its own 97 tests + typecheck ==="
 # The vendored package carries its own suite. It needs its dev toolchain
 # (typescript, ajv), which is NOT committed, so this stage can only run where
