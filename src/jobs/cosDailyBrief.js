@@ -213,7 +213,9 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
   // DAILY_TOKEN_BUDGET and the guard undercounts (see the announcement below).
   await logRun({ env, model: result.model || model, usage: result.usage, latencyMs });
 
-  const validation = validateBrief(result.parsed, minimized);
+  // `now` is threaded so the brief's own generated_at is the job's real clock,
+  // never whatever the model decided to write there.
+  const validation = validateBrief(result.parsed, minimized, now);
   if (!validation.ok) {
     logger.event('cos.brief.rejected', {
       level: 'error', error_category: 'validation', outcome: validation.category,
