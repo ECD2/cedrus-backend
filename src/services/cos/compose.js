@@ -439,7 +439,7 @@ export function buildRequestBody(input, model) {
  * rejects any citation the model invented. A brief that cites a record we never
  * sent is not shown, is not emailed, and is not written back.
  */
-export function validateBrief(raw, input) {
+export function validateBrief(raw, input, now = new Date()) {
   const fail = (detail) => ({ ok: false, category: 'invalid_schema', detail });
   if (typeof raw !== 'object' || raw === null) return fail('response is not an object');
   const b = raw;
@@ -502,6 +502,17 @@ export function validateBrief(raw, input) {
       ...b,
       // Ours, not the model's, so it cannot be softened or dropped.
       model_disclaimer: MODEL_DISCLAIMER,
+      // Same reasoning, and it is not hypothetical: on the 2026-08-20 run the
+      // model emitted generated_at "2026-08-20T12:00:00Z" for a brief composed
+      // at 19:17Z. It passed validation, because the schema only requires the
+      // field to be a string — nothing could have checked it against reality.
+      //
+      // Nothing renders it today (the CoS panel reads the today_briefs COLUMN,
+      // not this key), which is exactly why it would have gone on being wrong.
+      // A hallucinated timestamp that survives validation is a bug whether or
+      // not anything currently displays it: it is stored data asserting a
+      // falsehood, and the next consumer has no way to know.
+      generated_at: now.toISOString(),
       // Origin marker. CoS's TypeScript type does not declare these, but a TS
       // cast validates nothing at runtime, so they are inert to its renderer
       // while making the row's provenance unambiguous to anyone reading it.

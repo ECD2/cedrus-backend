@@ -293,6 +293,32 @@ section('contract — the CoS today_brief_v1 shape is honoured');
   const accepted = compose.validateBrief(briefCiting(refs), input);
   ok('the disclaimer is OURS, not the model\'s',
     accepted.brief.model_disclaimer === compose.MODEL_DISCLAIMER, accepted.brief.model_disclaimer);
+
+  // The model really did hallucinate this on 2026-08-20: generated_at
+  // "2026-08-20T12:00:00Z" for a brief composed at 19:17Z. It passed validation
+  // because the schema only requires a string. Nothing renders the field, which
+  // is precisely why it would have stayed wrong.
+  const REAL = new Date('2026-08-20T19:17:56.164Z');
+  const lied = compose.validateBrief(
+    briefCiting(refs, { generated_at: '2026-08-20T12:00:00Z' }), input, REAL);
+  ok('a hallucinated generated_at is OVERWRITTEN with the real time',
+    lied.brief.generated_at === REAL.toISOString(), lied.brief.generated_at);
+  ok('...and the model\'s value does not survive anywhere in the brief',
+    !JSON.stringify(lied.brief).includes('2026-08-20T12:00:00Z'), lied.brief.generated_at);
+
+  // CONTROL: a model that happens to emit the CORRECT time is also overwritten,
+  // not merely tolerated. Otherwise the assertion above would pass for a
+  // validator that only rewrote values it judged wrong — which it cannot judge.
+  const honest = compose.validateBrief(
+    briefCiting(refs, { generated_at: REAL.toISOString() }), input, REAL);
+  ok('CONTROL: generated_at is always authored, never accepted',
+    honest.brief.generated_at === REAL.toISOString(), honest.brief.generated_at);
+
+  // And a brief with NO generated_at at all still gets one.
+  const missing = briefCiting(refs); delete missing.generated_at;
+  const filled = compose.validateBrief(missing, input, REAL);
+  ok('a brief missing generated_at gets the real time',
+    filled.ok && filled.brief.generated_at === REAL.toISOString(), filled.brief && filled.brief.generated_at);
   ok('provenance marker records that Cedrus composed it',
     accepted.brief.composed_by === compose.COMPOSED_BY && accepted.brief.source_system === 'cedrus');
 
@@ -356,6 +382,13 @@ section('no prompt, no raw response, no full body is ever written');
   const { deps, written } = makeDeps({ brief: briefCiting([{ type: 'email_message', id: IDS.mail }]) });
   const r = await runCosDailyBrief({ env: ARMED_ENV, now: new Date('2026-08-17T11:00:00Z'), deps });
   ok('CONTROL: the happy path did write a brief back', written.length === 1 && r.written === true, r);
+
+  // The brief's generated_at must be the JOB'S clock, not a later one snapped
+  // inside the validator. Both it and the row's expires_at derive from `now`,
+  // so they must agree; letting validateBrief default would drift them apart by
+  // however long the model call took (~9s in production).
+  ok('the brief carries the JOB\'s now, not a later instant',
+    r.brief.generated_at === '2026-08-17T11:00:00.000Z', r.brief.generated_at);
 
   const payload = JSON.stringify(written[0].brief);
   ok('the written brief contains NO full body text', !payload.includes(SECRET_BODY), payload.slice(0, 120));
