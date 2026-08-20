@@ -139,7 +139,69 @@ export function resetCosClient() {
  * read that failed returns rows: null, NOT an empty array — "couldn't read"
  * and "read, found nothing" must never collapse into the same value.
  */
-export async function cosSelect(table, build, { env = process.env, columns = '*' } = {}) {
+// ── transient vs deterministic read failures ────────────────────────────────
+//
+// Rung 1 against production produced BOTH kinds in the same minute, which is
+// why they must be told apart:
+//
+//   PGRST303 "JWT issued at future"  — clock skew between the key's iat and the
+//     PostgREST server. It hit a DIFFERENT table on each run and vanished in
+//     between. Retrying fixes it. Failing closed on it means one skewed read
+//     aborts an otherwise healthy brief.
+//
+//   42703 "column ... does not exist" — a real mismatch between the reader and
+//     the schema. It failed identically on every run. Retrying CANNOT fix it;
+//     it only burns time and makes the log noisier before the same failure.
+//
+// The allowlist is deliberately TINY and opt-in. Anything not named here is
+// treated as permanent and fails on the first attempt. That direction matters:
+// wrongly retrying a permanent error wastes a rung and hides the cause, while
+// wrongly not-retrying a transient one is a visible, self-correcting miss.
+export const RETRYABLE_READ_CODES = Object.freeze(['PGRST303']);
+
+/** Retry budget. Small on purpose — this runs inside a scheduled job. */
+export const READ_RETRY = Object.freeze({ attempts: 3, backoffMs: 200 });
+
+export function isRetryableReadError(error) {
+  return Boolean(error) && RETRYABLE_READ_CODES.includes(error.code);
+}
+
+const defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Run a read, retrying ONLY allowlisted transient failures.
+ *
+ * Exported and seam-injected so the suite can drive both paths without a
+ * database: `run` returns supabase-js's { data, error } shape, `sleep` is
+ * replaced so tests do not actually wait. Returns the final result plus the
+ * number of attempts made, because "failed after one attempt" and "failed after
+ * three" are different facts and a test must be able to tell them apart.
+ */
+export async function withReadRetry(run, { label = 'read', attempts = READ_RETRY.attempts, backoffMs = READ_RETRY.backoffMs, sleep = defaultSleep } = {}) {
+  let last = { data: null, error: null };
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    last = await run();
+    if (!last.error) {
+      // Announce a RECOVERY. A retry that silently succeeds is indistinguishable
+      // from a read that never had trouble, which is how a degrading credential
+      // stays invisible until it fails outright (Lesson 7). Emitted here rather
+      // than in cosSelect so the suite can drive it without a database.
+      if (attempt > 1) {
+        logger.event('cos.read.retried', {
+          outcome: 'recovered',
+          retry_count: attempt - 1,
+          message: `CoS ${label} succeeded on attempt ${attempt} after a transient failure`,
+        });
+      }
+      return { ...last, attempts: attempt };
+    }
+    if (!isRetryableReadError(last.error)) return { ...last, attempts: attempt };
+    if (attempt < attempts) await sleep(backoffMs * attempt);
+  }
+  return { ...last, attempts };
+}
+
+export async function cosSelect(table, build, { env = process.env, columns = '*', sleep } = {}) {
   if (!READABLE_TABLES.includes(table)) {
     throw new Error(
       `cosSelect refused: '${table}' is not in READABLE_TABLES. ` +
@@ -149,16 +211,19 @@ export async function cosSelect(table, build, { env = process.env, columns = '*'
   if (!client) return { rows: null, error: null, disarmed: true };
 
   try {
-    let query = client.from(table).select(columns);
-    if (typeof build === 'function') query = build(query) || query;
-    const { data, error } = await query;
-    if (error) {
-      reportCosRead(table, error);
-      return { rows: null, error, disarmed: false };
+    const result = await withReadRetry(async () => {
+      let query = client.from(table).select(columns);
+      if (typeof build === 'function') query = build(query) || query;
+      return await query;
+    }, { label: table, ...(sleep ? { sleep } : {}) });
+
+    if (result.error) {
+      reportCosRead(table, result.error, result.attempts);
+      return { rows: null, error: result.error, disarmed: false };
     }
-    return { rows: data || [], error: null, disarmed: false };
+    return { rows: result.data || [], error: null, disarmed: false };
   } catch (err) {
-    reportCosRead(table, err);
+    reportCosRead(table, err, 1);
     return { rows: null, error: err, disarmed: false };
   }
 }
@@ -200,13 +265,19 @@ export async function cosInsertTodayBrief(row, { env = process.env } = {}) {
   }
 }
 
-function reportCosRead(table, error) {
+function reportCosRead(table, error, attempts = 1) {
+  const retryable = isRetryableReadError(error);
   logger.event('cos.read.failed', {
     level: 'error',
     error_category: 'db_error',
     error_code: (error && error.code) || 'unknown',
     outcome: 'fail_closed',
-    message: `CoS ${table} unreadable — the brief cannot be composed from partial data: ` +
+    retry_count: attempts - 1,
+    // Say whether retrying was even attempted. Otherwise "failed" reads the
+    // same for a permanent error and an exhausted transient one.
+    message: `CoS ${table} unreadable after ${attempts} attempt${attempts === 1 ? '' : 's'} ` +
+      `(${retryable ? 'transient, retries exhausted' : 'not retryable'}) — ` +
+      'the brief cannot be composed from partial data: ' +
       (error ? (error.message || String(error)) : 'query returned no usable result'),
   });
 }
