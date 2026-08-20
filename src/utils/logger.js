@@ -77,14 +77,44 @@ function nowIso() { return new Date().toISOString(); }
 // Belt-and-braces pass over any free-form string that survives to `message`
 // or a `meta` string value. The primary defense is the field allow-list above;
 // this catches PII/secrets that slip into prose.
-// ISO 8601 date, optionally with a time, fractional seconds, and Z or ±hh:mm.
-// Deliberately anchored on the DATE half: that is the part whose hyphens the
-// phone regex mistakes for separators. A bare time ('20:25') is already safe
-// because ':' is not in the phone character class.
-const ISO_TIMESTAMP =
-  /\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?/g;
-const ISO_SENTINEL = '\uE000';
-const ISO_SENTINEL_RE = /\uE000/g;
+// ── Known non-PII structures, masked before the catch-all phone pass ────────
+//
+// The phone pattern stays a CATCH-ALL on purpose. Switching to field-based
+// scrubbing (redact only `phone`, `to`, `from`) would be cleaner to read and
+// strictly worse: a number reaching a field nobody listed would ship to Railway
+// in the clear. A leaked phone number is a worse failure than a corrupted log
+// line, so the broad pattern stays and everything we can POSITIVELY IDENTIFY as
+// not-a-phone is taken out of its way first.
+//
+// Each entry here must be a shape a phone number can never take.
+//
+// UUID  — 8-4-4-4-12 hex. Correlation ids, and every *_id this service logs.
+//         Observed damage in prod: correlation_id="7998d9b5-cc[phone:4996]d1d-…"
+//         because '41-4996-8' is digits-and-hyphens and reads as 7 digits. The
+//         corruption is LOSSY — the original id cannot be recovered from the
+//         log line, which is why this had to be fixed rather than tolerated.
+// ISO    — date, optionally with time/fraction/offset. Anchored on the DATE
+//         half: that is the part whose hyphens the phone regex misreads. A bare
+//         time ('20:25') was never at risk, ':' not being a phone separator.
+//
+// ONE COMBINED PASS, NOT TWO. The stash is restored in document order, so the
+// masking must happen in document order too. Two sequential .replace() calls
+// would stash all UUIDs then all timestamps, and the restore — which walks the
+// string left to right — would put them back in the wrong places. Any new
+// structure goes into this alternation, never into a second pass.
+//
+// UUID is first in the alternation so the longer, more specific shape wins at
+// any position where both could start.
+const UUID_SOURCE =
+  '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
+const ISO_SOURCE =
+  '\\d{4}-\\d{2}-\\d{2}(?:[T ]\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d+)?)?(?:Z|[+-]\\d{2}:?\\d{2})?)?';
+const MASKED_STRUCTURES = new RegExp(UUID_SOURCE + '|' + ISO_SOURCE, 'g');
+
+// Unicode private-use: contains no digits (so it cannot itself read as a
+// number), one code unit, and absent from real log text.
+const MASK_SENTINEL = '\uE000';
+const MASK_SENTINEL_RE = /\uE000/g;
 
 export function scrub(input) {
   if (typeof input !== 'string') return input;
@@ -96,7 +126,7 @@ export function scrub(input) {
   s = s.replace(/\bSG\.[A-Za-z0-9_.-]{12,}/g, '[secret]'); // SendGrid
   s = s.replace(/\b(?:AC|SK)[0-9a-fA-F]{32}\b/g, '[secret]'); // Twilio SID/key
   s = s.replace(/\beyJ[A-Za-z0-9_-]{6,}\b/g, '[secret]');  // lone JWT-ish
-  // ── ISO timestamps are masked BEFORE the phone pass, then restored ────────
+  // ── Known structures are masked BEFORE the phone pass, then restored ─────
   //
   // The phone regex treats '-' as an internal separator, so '2026-08-15' reads
   // as one eight-digit number and became '[phone:0815]'. Real observed damage:
@@ -114,8 +144,8 @@ export function scrub(input) {
   // The sentinel is a Unicode private-use character: it contains no digits (so
   // it cannot itself be read as a number), it is one code unit (so offsets stay
   // simple), and it does not occur in real log text.
-  const isoStash = [];
-  s = s.replace(ISO_TIMESTAMP, (m) => { isoStash.push(m); return ISO_SENTINEL; });
+  const maskStash = [];
+  s = s.replace(MASKED_STRUCTURES, (m) => { maskStash.push(m); return MASK_SENTINEL; });
 
   // Phone numbers → last 4 only. Matches E.164 and loosely-formatted numbers
   // with >=7 digits; keeps short numerics (segment counts, ids) intact.
@@ -128,7 +158,7 @@ export function scrub(input) {
   // Restore in the order they were taken. shift() pairs with push() above; if
   // the stash ever ran dry the sentinel would be left visible rather than
   // silently swallowing text.
-  s = s.replace(ISO_SENTINEL_RE, () => (isoStash.length ? isoStash.shift() : ISO_SENTINEL));
+  s = s.replace(MASK_SENTINEL_RE, () => (maskStash.length ? maskStash.shift() : MASK_SENTINEL));
   return s;
 }
 

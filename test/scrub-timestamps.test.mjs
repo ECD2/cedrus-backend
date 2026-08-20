@@ -1,4 +1,4 @@
-// Bundle 39 — logger.scrub(): ISO timestamps survive, phone numbers do not.
+// Bundle 39 — logger.scrub(): known structures survive, phone numbers do not.
 // Run: bun test/scrub-timestamps.test.mjs
 //
 // What runs REAL here: the actual scrub() exported by src/utils/logger.js, and
@@ -90,6 +90,86 @@ section('ISO timestamps survive intact — the bug being fixed');
   }
   ok('a bare time was never at risk (":" is not a phone separator)',
     scrub('at 20:25:00') === 'at 20:25:00');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section('UUIDs survive intact — correlation_ids taken from production logs');
+{
+  // These three are the shapes that exposed the bug. The live service logged
+  // correlation_id="7998d9b5-cc[phone:4996]d1d-..." because '41-4996-8' is
+  // digits-and-hyphens and reads as a seven-digit number.
+  //
+  // A and B are RECONSTRUCTIONS. The originals cannot be recovered: the
+  // corruption is lossy, and running the pre-fix scrub over these values
+  // produces a different marker than prod logged, which proves the true inputs
+  // differed. C is verbatim — it survived by luck, so it was logged in full.
+  // That is exactly why C belongs here: a fix that only handled ids which
+  // happen to break would leave the lucky ones untested and free to regress.
+  const CORRELATION_IDS = [
+    ['A (reconstruction, was mangled)', '7998d9b5-cc41-4996-8d1d-03464d61dc0d'],
+    ['B (reconstruction, was mangled)', 'd12156a7-5347-41bd-b8ef-359ad9d81949'],
+    ['C (verbatim, survived by luck)',  '7efca79c-ac27-4f54-a949-4ef8a20520b4'],
+  ];
+  for (const [label, id] of CORRELATION_IDS) {
+    ok(`${label}: passes through untouched`, scrub(id) === id, scrub(id));
+    ok(`${label}: no [phone:] marker is invented`, !/\[phone:/.test(scrub(id)), scrub(id));
+  }
+
+  // Shape coverage beyond the three real ones.
+  const SHAPES = [
+    ['all-digit groups',   '12345678-1234-1234-1234-123456789012'],
+    ['uppercase hex',      '7EFCA79C-AC27-4F54-A949-4EF8A20520B4'],
+    ['leading zeros',      '00000000-0000-0000-0000-000000000000'],
+  ];
+  for (const [label, id] of SHAPES) {
+    ok(`uuid shape untouched: ${label}`, scrub(id) === id, scrub(id));
+  }
+
+  // In situ, as the logger actually emits it.
+  const line = 'correlation_id="7998d9b5-cc41-4996-8d1d-03464d61dc0d" trace_stage="dispatch"';
+  ok('a full log fragment is untouched', scrub(line) === line, scrub(line));
+
+  // CONTROL: the exemption must require an EXACT uuid shape. If a near-miss
+  // were exempted too, the exemption itself could hide a phone number — which
+  // is the only way this change could make redaction worse.
+  //
+  // Group 2 has five hex digits instead of four, so it is not a uuid; the
+  // digit run '41-4996-8' is still seven digits and must still be redacted.
+  const nearMiss = '7998d9b5-cc411-4996-8d1d-03464d61dc0d';
+  ok('CONTROL: a malformed uuid gets NO exemption and is still redacted',
+    scrub(nearMiss) !== nearMiss && /\[phone:/.test(scrub(nearMiss)), scrub(nearMiss));
+
+  // Not a uuid and untouched — but for a DIFFERENT reason, and the distinction
+  // matters. 31 digits exceeds the phone pass's own 15-digit ceiling, so it is
+  // declined as too long to be a phone, not exempted as a known structure.
+  // Asserting this as "the exemption worked" would have been a false proof; the
+  // first draft of this control did exactly that.
+  const tooLong = '1234567-1234-1234-1234-123456789012';
+  ok('a 31-digit run is declined by the phone pass, not by the exemption',
+    scrub(tooLong) === tooLong && !/\[phone:/.test(scrub(tooLong)), scrub(tooLong));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section('one combined mask pass — order is preserved when shapes interleave');
+{
+  // The stash restores in document order, so masking must happen in document
+  // order. Two sequential passes (all UUIDs, then all timestamps) would stash
+  // out of order and the restore would put them back in the wrong places.
+  const mixed = 'run 7998d9b5-cc41-4996-8d1d-03464d61dc0d at 2026-08-20T11:00:00Z ' +
+                'then d12156a7-5347-41bd-b8ef-359ad9d81949 at 2026-08-21';
+  ok('uuid → date → uuid → date round-trips exactly', scrub(mixed) === mixed, scrub(mixed));
+
+  const dateFirst = '2026-08-20T11:00:00Z 7efca79c-ac27-4f54-a949-4ef8a20520b4 2026-08-21 ' +
+                    'd12156a7-5347-41bd-b8ef-359ad9d81949';
+  ok('date → uuid → date → uuid round-trips exactly', scrub(dateFirst) === dateFirst, scrub(dateFirst));
+
+  // And a phone in the middle of all that is still caught.
+  const withPhone = '7efca79c-ac27-4f54-a949-4ef8a20520b4 +17869727469 2026-08-20T11:00:00Z';
+  const out = scrub(withPhone);
+  ok('the uuid survives alongside a redacted phone', out.includes('7efca79c-ac27-4f54-a949-4ef8a20520b4'), out);
+  ok('the timestamp survives too', out.includes('2026-08-20T11:00:00Z'), out);
+  ok('the phone is redacted', /\[phone:7469\]/.test(out), out);
+  ok('NO 7-digit run survives anywhere', !hasLongDigitRun(out), out);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
