@@ -376,6 +376,69 @@ section('input bounding — 240-char excerpts, 24k total, captures trimmed first
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+section('derived facts — the model is handed conclusions, not raw dates');
+{
+  const NOW = Date.parse('2026-08-20T19:00:00Z');
+
+  // The real 2026-08-20 case: Admin Panel, target 2026-07-23, a month gone.
+  // The model read that date, repeated it, and never noticed it had passed.
+  const min = compose.minimizeInput({
+    workstreams: [
+      { id: 'w1', name: 'Admin Panel', status: 'active', priority: 'high', health: 'ok',
+        target_date: '2026-07-23', archived_at: null, created_at: '2026-06-01T00:00:00Z' },
+      { id: 'w2', name: 'Future thing', status: 'active', priority: 'low', health: 'ok',
+        target_date: '2026-12-01', archived_at: null, created_at: '2026-06-01T00:00:00Z' },
+      { id: 'w3', name: 'No target', status: 'active', priority: 'low', health: 'ok',
+        target_date: null, archived_at: null, created_at: '2026-06-01T00:00:00Z' },
+    ],
+    open_loops: [
+      { id: 'l1', title: 'Overdue loop', status: 'open', priority: 'high',
+        due_at: '2026-08-10T00:00:00Z', created_at: '2026-07-01T00:00:00Z' },
+      { id: 'l2', title: 'Not due yet', status: 'open', priority: 'low',
+        due_at: '2026-09-30T00:00:00Z', created_at: '2026-08-15T00:00:00Z' },
+      { id: 'l3', title: 'No due date', status: 'open', priority: 'low',
+        due_at: null, created_at: '2026-05-20T00:00:00Z' },
+    ],
+    decisions: [], captures: [], agent_runs: [], email_messages: [], email_ai_analyses: [],
+  }, NOW);
+
+  const w = Object.fromEntries(min.workstreams.map((x) => [x.id, x]));
+  ok('a month-past target is quantified, not just present',
+    w.w1.target_date_days_past === 28, w.w1.target_date_days_past);
+  ok('a FUTURE target yields null, not a negative number',
+    w.w2.target_date_days_past === null, w.w2.target_date_days_past);
+  ok('no target date yields null', w.w3.target_date_days_past === null, w.w3.target_date_days_past);
+  ok('the raw target_date is still carried alongside', w.w1.target_date === '2026-07-23');
+
+  const l = Object.fromEntries(min.open_loops.map((x) => [x.id, x]));
+  ok('an overdue loop says HOW overdue', l.l1.overdue === true && l.l1.overdue_days === 10,
+    { overdue: l.l1.overdue, days: l.l1.overdue_days });
+  ok('a not-yet-due loop has overdue_days null',
+    l.l2.overdue === false && l.l2.overdue_days === null, l.l2.overdue_days);
+  ok('every loop carries its age', l.l3.age_days === 92, l.l3.age_days);
+  ok('age is independent of a due date', l.l2.age_days === 5, l.l2.age_days);
+
+  // A resolved loop is not overdue however old its due date — the existing
+  // isOverdue rule must still hold now that overdue_days keys off it.
+  const resolved = compose.minimizeInput({
+    workstreams: [], open_loops: [{ id: 'lr', title: 'Done', status: 'resolved', priority: 'low',
+      due_at: '2026-01-01T00:00:00Z', created_at: '2025-12-01T00:00:00Z' }],
+    decisions: [], captures: [], agent_runs: [], email_messages: [], email_ai_analyses: [],
+  }, NOW);
+  ok('CONTROL: a resolved loop is dropped as noise, so cannot be reported overdue',
+    resolved.open_loops.length === 0, resolved.open_loops);
+
+  ok('daysPast handles an unparseable date', compose.daysPast('not-a-date', NOW) === null);
+  ok('daysPast handles null', compose.daysPast(null, NOW) === null);
+
+  // The rules must TELL the model these exist, or it will keep doing its own
+  // arithmetic and keep getting it wrong.
+  const rules = compose.SYSTEM_RULES.join('\n');
+  ok('the prompt names the derived fields', /target_date_days_past/.test(rules) && /overdue_days/.test(rules) && /age_days/.test(rules));
+  ok('the prompt forbids the model doing its own date arithmetic', /[Dd]o not do date arithmetic/.test(rules));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 section('no prompt, no raw response, no full body is ever written');
 {
   reset();
