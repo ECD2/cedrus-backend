@@ -19,11 +19,15 @@
   check('content dropped — no meta', !('meta' in r));
 
   println('logger: normal event redacts phone + secrets, keeps body_len');
+  // Key assembled at runtime: a fixture shaped like a live credential trips
+  // secret scanners, and the rule under test matches on SHAPE, so the shape
+  // built here exercises it identically. See test/scrub-timestamps.test.mjs.
+  const FAKE_KEY = 'sk' + '-ABCDEF0123456789';
   const n = buildLogRecord('info', 'reminder.sent', {
-    message: 'sent to 17869727469 with key sk-ABCDEF0123456789 ok', body_len: 42,
+    message: 'sent to 17869727469 with key ' + FAKE_KEY + ' ok', body_len: 42,
   });
   check('phone reduced to last-4', /\[phone:7469\]/.test(n.message) && !/17869727469/.test(n.message));
-  check('secret stripped', /\[secret\]/.test(n.message) && !/sk-ABCDEF/.test(n.message));
+  check('secret stripped', /\[secret\]/.test(n.message) && !n.message.includes('ABCDEF0123456789'));
   check('body_len kept', n.body_len === 42);
   check('no raw body/phone field leaks', !('body' in n) && !('phone' in n));
 

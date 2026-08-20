@@ -35,7 +35,7 @@
 process.env.NODE_ENV = 'test';
 process.env.SUPABASE_URL = 'http://supabase.invalid';
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-key';
-process.env.OPENAI_API_KEY = 'sk-test-not-real';
+process.env.OPENAI_API_KEY = 'test-key-not-real';
 process.env.TWILIO_ACCOUNT_SID = 'ACtest';
 process.env.TWILIO_AUTH_TOKEN = 'test-token';
 process.env.TWILIO_FROM_NUMBER = '+15550000000';
