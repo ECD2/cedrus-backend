@@ -1080,6 +1080,33 @@ sets `config.briefDryRun = true` (`prelude-cards.js:47`), so the dry-run branch
 **A test asserting "nothing was sent" must prove that sending was possible**;
 pair every such assertion with a control that really sends.
 
+### 20. Three things agreeing is one thing, if they share an author
+
+**Incident (2026-08-20).** The CoS reader asked for `agent_runs.report_body`.
+CoS's column is `original_body`. Every read of that table failed with `42703`
+the first time it ran against production — while the entire battery was green,
+including a bundle written specifically to test that reader.
+
+It could not have been otherwise. The reader requested `report_body`, the
+composer read `r.report_body`, and the fixture SUPPLIED `report_body`. Three
+independent-looking pieces of evidence, one author, one assumption, wrong.
+
+This is Lesson 2's corollary — *three pieces of evidence that share a common
+cause are one piece of evidence* — pointed at test design rather than debugging.
+And it is Lesson 4's mechanism: the fixture encoded a falsified belief, so the
+test could only ever confirm it.
+
+**Rule.** A fixture written from the same source as the code under test proves
+the code matches your understanding, not that it matches reality. When code
+talks to a system you do not control, **something in the battery must read that
+system's own description of itself.** For a database that is its schema; for an
+HTTP API its contract document. Everything else is you agreeing with you.
+
+**Corollary on pins.** The first regression pin for this grepped the source for
+the old column name and broke the moment a comment mentioned it while describing
+the incident. A textual pin cannot tell a code reference from prose about one —
+assert on exported data instead.
+
 ---
 
 ## II.5. Verified environment facts
@@ -1188,6 +1215,16 @@ Established against live prod. Do not re-derive these from files; if you must re
 - **A dry run no longer records a delivery.** `recordBriefSent()` (which bumps `app_users.total_briefs_sent` and `last_brief_sent_at`) and `openPendingPrompt()` were both running under `BRIEF_DRY_RUN`, and every dry-run branch logged `outcome: 'sent'`. `markSent()` deliberately still runs — `briefs.hasBriefForWeek()` treats status `'sent'` as the re-dispatch guard (`services/briefs.js:29`), so suppressing it would recompose the same brief hourly. **Two different facts were conflated: "this week is dealt with" (true under dry run) and "this reached a person" (false).**
 - **Prod damage from that bug, measured read-only 2026-08-18** (see the session notes for the full table): **0 false rows in `messages`** — all 6 weekly-brief rows are correctly tagged `provider_status='dry_run'`, and the 7 `null`-status rows are genuine TwiML replies, the only real outbound path. The falsehood is entirely in **`app_users.total_briefs_sent = 3` on both users (6 phantom deliveries)**, both `last_brief_sent_at` values, and **6 `briefs` rows carrying `status='sent'` + `sent_at`** for briefs nobody received. Cards and reminders have zero rows, so those rails contributed nothing. **Not cleaned** — reporting only.
 - **The scheduler now registers ELEVEN jobs**, as a `JOB_REGISTRY` data table rather than eleven `cron.schedule()` calls, and `guard()` is exported with an injectable gate so the budget wiring is proven by driving it rather than by grepping for `outbound: true`.
+
+**CoS reader — rung 1 armed and passing** (established 2026-08-20)
+
+- **`COS_SUPABASE_URL` + `COS_SERVICE_ROLE_KEY` are SET on Railway.** The CoS reader is ARMED. Delivery is still fully disarmed: no `COS_BRIEF_LIVE`, no `RESEND_API_KEY`, no `COS_BRIEF_TO`, so nothing can send. `cos.mode` reads `armed` on every tick.
+- **`@supabase/supabase-js` accepts the new `sb_secret_` key format.** Pinned `^2.45.0`, installed **2.112.0**. Only presence is validated; the key is never parsed as a JWT (`decodeJWT` is called on session access tokens only). 2.112.0 has first-class `isNewApiKey()` awareness of `sb_publishable_`/`sb_secret_`. One wrinkle: its own comment says new keys "must never be sent as a Bearer token", but `omitApiKeyAsBearer` is passed only for `functionsFetch`, so the PostgREST path DOES send `Authorization: Bearer <key>`. Reads work regardless — verified live.
+- **The reader asked CoS for a column that does not exist, and the whole battery was green.** `agent_runs.report_body`; CoS names it **`original_body`**. Every read of that table failed `42703` the first time rung 1 ran. The reader, the composer AND the fixture were all written from the same reading of CoS, so all three agreed and all three were wrong. **No local test can catch that class** — see Lesson 20.
+- **`test/cos-schema-check.mjs` is the structural answer.** It reads PostgREST's own OpenAPI document (`GET /rest/v1/`) and validates all **75** column names the reader requests across **8** tables. Registered as a battery stage. Without `COS_` credentials it **announces a skip and exits 0** — never silently passes. Proven against the real bug: reintroducing `report_body` turns it RED and the diagnostic names `original_body`.
+- **Transient vs deterministic reads are now distinguished.** `PGRST303` ("JWT issued at future", clock skew between the key's `iat` and the PostgREST server) hit a DIFFERENT table on each run and vanished between runs; it is retried up to 3 times with increasing backoff. Everything else — `42703`, `42P01`, `42501` — fails on the first attempt, because retrying a permanent error only delays the cause. `RETRYABLE_READ_CODES` is a one-entry opt-in allowlist. A recovery announces `cos.read.retried`; a silent recovery would hide a degrading credential.
+- **Live row counts, 2026-08-20 (all 8 tables read, 0 failures):** workstreams 5, open_loops 2, decisions 1, captures 1, agent_runs 0, email_messages 0 (36h window), email_ai_analyses 1, today_briefs 2. **email_messages is 0 because CoS's email sync is manual-only and has not been run** — the brief has no email to include yet.
+- **`.gitignore`'s `node_modules/` does not match a SYMLINK of that name.** A worktree symlink to the main checkout's dependencies was committed by `git add -A`, and merging it pointed `node_modules` at itself, destroying the real directory and reddening the battery. A bare `node_modules` pattern was added. Watch for this in any worktree that needs dependencies.
 
 **Frontend gates** (established 2026-07-29 at the morning merge ceremony)
 - **`npm run lint` in cedrus-frontend does NOT pass, and has not for some time.** On `main` at `d14fa28` — *before* any V1 work — `npx eslint src` reports **103 errors / 9 warnings**, all `prettier/prettier` formatting on pre-existing files (`terms.tsx`, `privacy.tsx`, `support.tsx`, `sms.tsx`, `index.tsx`, …). Typecheck, vitest and build are all genuinely green; **lint is the one red gate and it is inherited debt, not anyone's regression.** Do not report "lint clean" without saying which paths you linted.
