@@ -679,6 +679,92 @@ section('Resend transport — three gates, verified sending domain');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+section('read retry — transient recovers, deterministic fails immediately');
+{
+  const { withReadRetry, isRetryableReadError, RETRYABLE_READ_CODES, READ_RETRY } = clientMod;
+
+  // Which codes are retryable at all.
+  ok('PGRST303 (JWT issued at future) is retryable', isRetryableReadError({ code: 'PGRST303' }));
+  ok('42703 (column does not exist) is NOT retryable', !isRetryableReadError({ code: '42703' }));
+  ok('42P01 (relation does not exist) is NOT retryable', !isRetryableReadError({ code: '42P01' }));
+  ok('42501 (permission denied) is NOT retryable', !isRetryableReadError({ code: '42501' }));
+  ok('an unknown code is NOT retryable', !isRetryableReadError({ code: 'WHATEVER' }));
+  ok('a null error is not retryable', !isRetryableReadError(null));
+  ok('the allowlist is deliberately tiny', RETRYABLE_READ_CODES.length === 1, RETRYABLE_READ_CODES);
+
+  const noSleep = { sleep: async () => {} };
+  const flaky2 = () => { let n = 0; return async () => (++n < 2
+    ? { data: null, error: { code: 'PGRST303', message: 'JWT issued at future' } }
+    : { data: [{ id: 'a' }], error: null }); };
+
+  // TRANSIENT that recovers — the real PGRST303 case from rung 1.
+  let calls = 0;
+  const flaky = async () => {
+    calls++;
+    return calls < 3 ? { data: null, error: { code: 'PGRST303', message: 'JWT issued at future' } }
+                     : { data: [{ id: 'a' }], error: null };
+  };
+  let r = await withReadRetry(flaky, noSleep);
+  ok('a transient failure that recovers returns DATA, not an error', !r.error && r.data.length === 1, r);
+  ok('...and reports the attempt it succeeded on', r.attempts === 3, r.attempts);
+  ok('...having actually retried', calls === 3, calls);
+
+  // DETERMINISTIC — must fail on the FIRST attempt, wasting no retries.
+  calls = 0;
+  const permanent = async () => {
+    calls++;
+    return { data: null, error: { code: '42703', message: 'column agent_runs.report_body does not exist' } };
+  };
+  r = await withReadRetry(permanent, noSleep);
+  ok('a deterministic failure returns the error', Boolean(r.error) && r.error.code === '42703', r);
+  ok('a deterministic failure is tried exactly ONCE', r.attempts === 1 && calls === 1, { attempts: r.attempts, calls });
+
+  // CONTROL: with the SAME harness a transient error really does retry more
+  // than once. Without this, "tried once" above could pass simply because the
+  // retry loop was broken for everything.
+  calls = 0;
+  const alwaysTransient = async () => { calls++; return { data: null, error: { code: 'PGRST303', message: 'skew' } }; };
+  r = await withReadRetry(alwaysTransient, noSleep);
+  ok('CONTROL: a transient error DOES exhaust the budget', calls === READ_RETRY.attempts && r.attempts === READ_RETRY.attempts, calls);
+  ok('...and still fails closed once exhausted', Boolean(r.error), r);
+
+  // Success first time: no retries, no waiting.
+  calls = 0;
+  r = await withReadRetry(async () => { calls++; return { data: [], error: null }; }, noSleep);
+  ok('a clean read is tried once', r.attempts === 1 && calls === 1);
+
+  // Backoff must actually be awaited between transient attempts.
+  const waits = [];
+  await withReadRetry(alwaysTransient, { sleep: async (ms) => { waits.push(ms); } });
+  ok('backoff is applied between attempts, not after the last',
+    waits.length === READ_RETRY.attempts - 1, waits);
+  ok('backoff increases', waits.length === 2 && waits[1] > waits[0], waits);
+
+  // A RECOVERY MUST ANNOUNCE ITSELF. A retry that silently succeeds looks
+  // exactly like a read that never had trouble, so a credential degrading
+  // toward failure stays invisible until it fails outright.
+  calls = 0;
+  const recovEvents = await captureLogs(async () => { await withReadRetry(flaky2(), { ...noSleep, label: 'agent_runs' }); });
+  const recov = eventNamed(recovEvents, 'cos.read.retried');
+  ok('a recovered read announces cos.read.retried', Boolean(recov), recovEvents.map((e) => e.event));
+  // retry_count, not `attempts`: buildLogRecord allowlists structural fields and
+  // silently DROPS anything else, so an invented field name would vanish from
+  // the log while the test still passed on the message text alone.
+  ok('...naming the table and the retry count', recov && recov.retry_count === 1 && /agent_runs/.test(recov.message), recov);
+
+  // CONTROL: a first-try success announces NOTHING, or the event would be noise
+  // and could not distinguish a recovery from a healthy read.
+  const cleanEvents = await captureLogs(async () => { await withReadRetry(async () => ({ data: [], error: null }), noSleep); });
+  ok('CONTROL: a clean read announces no retry event',
+    !eventNamed(cleanEvents, 'cos.read.retried'), cleanEvents.map((e) => e.event));
+
+  // And a deterministic error waits not at all.
+  const noWaits = [];
+  await withReadRetry(permanent, { sleep: async (ms) => { noWaits.push(ms); } });
+  ok('a deterministic failure never sleeps', noWaits.length === 0, noWaits);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 section('the reader module is structurally write-only-to-today_briefs');
 {
   const exported = Object.keys(clientMod);
