@@ -117,6 +117,15 @@ echo "=== Bundle 39 — logger.scrub: ISO timestamps vs phone redaction ==="
 bun test/scrub-timestamps.test.mjs
 
 echo ""
+echo "=== CoS reader/schema conformance ==="
+# The ONLY stage that can catch a reader/schema mismatch. Every other suite
+# passes happily while one exists, because the reader, the composer and the
+# fixtures were all written from the same reading of CoS. Needs COS_
+# credentials; without them it ANNOUNCES a skip and exits 0 — a silent skip
+# would be indistinguishable from a pass, which is the disease it treats.
+bun test/cos-schema-check.mjs
+
+echo ""
 echo "=== contracts package: its own 97 tests + typecheck ==="
 # The vendored package carries its own suite. It needs its dev toolchain
 # (typescript, ajv), which is NOT committed, so this stage can only run where

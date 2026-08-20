@@ -47,7 +47,6 @@ process.env.TWILIO_ACCOUNT_SID = 'ACtest';
 process.env.TWILIO_AUTH_TOKEN = 'test-token';
 process.env.TWILIO_FROM_NUMBER = '+15550000000';
 
-import { readFileSync } from 'node:fs';
 
 // DYNAMIC imports, deliberately. Static `import` is hoisted and evaluated
 // BEFORE the process.env assignments above, so config.js's required() would
@@ -59,6 +58,7 @@ const { guard, JOB_REGISTRY } = await import('../src/jobs/scheduler.js');
 const compose = await import('../src/services/cos/compose.js');
 const ledger = await import('../src/services/cos/ledger.js');
 const clientMod = await import('../src/services/cos/client.js');
+const readerCols = await import('../src/services/cos/reader.js');
 const { ResendTransport, createResendTransport, deliveryEnv, DEFAULT_FROM } = await import('../src/services/cos/resendTransport.js');
 const { renderBriefEmail, esc } = await import('../src/services/cos/renderer.js');
 
@@ -518,12 +518,13 @@ section('agent_runs excerpt column — regression pin for the 2026-08-20 inciden
   //
   // What this pin does catch is a naive revert to the old name, and it records
   // the incident where someone changing this line will see it.
-  const readerSrc = readFileSync(new URL('../src/services/cos/reader.js', import.meta.url), 'utf8');
-  const composeSrc = readFileSync(new URL('../src/services/cos/compose.js', import.meta.url), 'utf8');
-  ok('reader requests original_body for agent_runs', readerSrc.includes('original_body'), 'missing');
-  ok('reader no longer requests report_body', !readerSrc.includes('report_body'), 'still present');
-  ok('composer reads r.original_body', composeSrc.includes('str(r.original_body)'), 'missing');
-  ok('composer no longer reads r.report_body', !composeSrc.includes('r.report_body'), 'still present');
+  // Assert on the reader's exported column DATA, not on source text. The first
+  // version of this pin grepped the whole file and broke the moment a comment
+  // mentioned the old name while describing the incident — a textual pin cannot
+  // tell a code reference from prose about it.
+  const agentCols = readerCols.READER_COLUMNS.agent_runs;
+  ok('reader requests original_body for agent_runs', agentCols.includes('original_body'), agentCols);
+  ok('reader no longer requests report_body', !agentCols.includes('report_body'), agentCols);
 
   // And the behaviour, not just the strings: a row carrying original_body must
   // produce an excerpt.
