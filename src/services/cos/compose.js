@@ -419,6 +419,12 @@ export const SYSTEM_RULES = [
   'Email is evidence of what arrived, not proof that it matters. An unread newsletter is not a priority.',
   'target_date_days_past, overdue_days and age_days are ALREADY COMPUTED for you. Do not do date arithmetic yourself; use these numbers and say them plainly.',
   'A workstream with target_date_days_past set is PAST ITS TARGET by that many days. Say so explicitly — that is the fact, not the target date itself.',
+  // The 2026-08-20 run produced three priorities from eight thin records, and
+  // the third simply restated a workstream title three times: name ->
+  // "Review design updates needed for X" -> "Schedule a design review for X".
+  // Zero information added. "At most 3" reads to a model as a target to fill.
+  'Return FEWER than three priorities when the records do not support three. One well-evidenced priority is a better brief than three thin ones.',
+  'A priority that only restates a record\'s title, adding no reason the owner could not read off the record itself, is padding. Leave it out.',
   'Prefer an honest short brief over a padded one. An empty section is a valid answer.',
   'Do not address the owner by name, and do not open with a greeting.',
 ];

@@ -436,6 +436,17 @@ section('derived facts — the model is handed conclusions, not raw dates');
   const rules = compose.SYSTEM_RULES.join('\n');
   ok('the prompt names the derived fields', /target_date_days_past/.test(rules) && /overdue_days/.test(rules) && /age_days/.test(rules));
   ok('the prompt forbids the model doing its own date arithmetic', /[Dd]o not do date arithmetic/.test(rules));
+
+  // Anti-padding. "At most 3" reads to a model as a target to fill: the
+  // 2026-08-20 run returned three priorities from eight thin records and the
+  // third restated a workstream title three times over.
+  ok('the prompt asks for FEWER than three when unsupported', /FEWER than three/.test(rules), 'missing');
+  ok('the prompt says one well-evidenced beats three thin', /One well-evidenced priority is a better brief/.test(rules), 'missing');
+  ok('the prompt names title-restatement as padding', /only restates a record's title/.test(rules), 'missing');
+  // The ceiling itself must survive — a prompt that discourages three must not
+  // also stop enforcing the maximum.
+  ok('CONTROL: the three-priority ceiling is still stated', /at most 3 priorities/i.test(rules), 'missing');
+  ok('CONTROL: the ceiling is still ENFORCED in code', compose.LIMITS.max_priorities === 3);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
