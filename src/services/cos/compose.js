@@ -89,6 +89,19 @@ function strArray(v, max, each) {
   return v.slice(0, max).map((x) => clamp(str(x) ?? String(x ?? ''), each)).filter(Boolean);
 }
 
+/**
+ * Whole days between `then` and `now`. Positive = in the past.
+ *
+ * Rounded down on purpose: "27 days past target" is a fact, "27.4 days" is
+ * noise, and the model is being handed a conclusion, not a measurement.
+ */
+export function daysPast(iso, now) {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.floor((now - t) / 86_400_000);
+}
+
 export function isOverdue(dueAt, status, now) {
   if (!dueAt || status === 'resolved' || status === 'dropped') return false;
   return new Date(dueAt).getTime() < now;
@@ -122,6 +135,15 @@ export function minimizeInput(raw, now = Date.now(), includeExcerpts = true) {
       current_stage: clamp(str(w.current_stage), LIMITS.field_chars),
       next_action: clamp(str(w.next_action), LIMITS.field_chars),
       target_date: str(w.target_date),
+      // DERIVED, not left for the model to work out. On 2026-08-20 it read a
+      // target_date of 2026-07-23, repeated it back in a priority, and never
+      // noticed the date was a month gone. The field it needed was right there.
+      // Asking a language model to do date arithmetic against "today" is asking
+      // for the failure that actually happened; hand it the answer instead.
+      target_date_days_past: (() => {
+        const d = daysPast(str(w.target_date), now);
+        return d !== null && d > 0 ? d : null;
+      })(),
     }));
 
   const open_loops = (raw.open_loops || [])
@@ -136,6 +158,11 @@ export function minimizeInput(raw, now = Date.now(), includeExcerpts = true) {
       due_at: str(l.due_at),
       workstream_id: l.workstream_id ? String(l.workstream_id) : null,
       overdue: isOverdue(l.due_at, l.status, now),
+      // Same reasoning: how far past due, and how long the loop has been open.
+      // Age matters independently of a due date — a loop open for months with
+      // no due date is a signal the model cannot derive from a bare timestamp.
+      overdue_days: isOverdue(l.due_at, l.status, now) ? daysPast(str(l.due_at), now) : null,
+      age_days: daysPast(String(l.created_at ?? ''), now),
     }));
 
   const decisions = (raw.decisions || []).map((d) => ({
@@ -390,6 +417,8 @@ export const SYSTEM_RULES = [
   "An email analysis with generation_mode 'fallback' consulted no model. Treat its suggestions as unweighted.",
   'Email marked is_demo true is synthetic test data. Never let it drive a priority.',
   'Email is evidence of what arrived, not proof that it matters. An unread newsletter is not a priority.',
+  'target_date_days_past, overdue_days and age_days are ALREADY COMPUTED for you. Do not do date arithmetic yourself; use these numbers and say them plainly.',
+  'A workstream with target_date_days_past set is PAST ITS TARGET by that many days. Say so explicitly — that is the fact, not the target date itself.',
   'Prefer an honest short brief over a padded one. An empty section is a valid answer.',
   'Do not address the owner by name, and do not open with a greeting.',
 ];
