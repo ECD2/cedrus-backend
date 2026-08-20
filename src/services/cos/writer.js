@@ -109,6 +109,46 @@ export async function resolveCosUserId({ env = process.env } = {}) {
 }
 
 /**
+ * The exact row inserted into CoS's today_briefs. Pure and exported so the
+ * suite asserts on the real object rather than on source text — an earlier pin
+ * in this file's history grepped source and broke the moment a comment
+ * mentioned the thing it pinned.
+ *
+ * This field list is a CONTRACT with CoS's own persist(): the same columns with
+ * the same meanings, so a row written here is indistinguishable from one CoS
+ * wrote itself.
+ *
+ * generated_at is DELIBERATELY ABSENT. CoS omits it and lets the column default
+ * to now() on the CoS database. Setting it from this runtime's clock put a
+ * measurable falsehood in the data: the 2026-08-20 row carried
+ * generated_at 19:17:56 against created_at 19:17:36, because the machine
+ * running the job is ~29 seconds AHEAD of CoS's database — the same skew behind
+ * the intermittent PGRST303 "JWT issued at future". The brief was stamped in
+ * CoS's future, and latestStoredBrief() ORDERS BY that column.
+ *
+ * expires_at deliberately DOES use this clock, because CoS computes it the same
+ * way (Date.now() + 12h in its own runtime). Matching CoS's behaviour matters
+ * more here than matching CoS's database.
+ */
+export function buildBriefRow({ userId, brief, minimizedInput, model, latencyMs, tokens = null, now = new Date() }) {
+  return {
+    user_id: userId,
+    schema_version: BRIEF_SCHEMA_VERSION,
+    // Required for CoS's reader to select it at all.
+    generation_mode: 'ai',
+    model,
+    input_fingerprint: fingerprint(minimizedInput),
+    structured_output: brief,
+    source_refs: collectSourceRefs(brief),
+    status: 'ok',
+    // status='ok' ⇒ error_category MUST stay null (today_briefs_error_has_category).
+    latency_bucket: latencyBucket(latencyMs),
+    token_bucket: tokenBucket(tokens),
+    expires_at: new Date(now.getTime() + BRIEF_TTL_MS).toISOString(),
+  };
+}
+
+/**
  * Insert the brief. Returns { id, skipped, reason }.
  *
  * A writeback failure is NOT treated as a failure of the whole job: the email
@@ -124,23 +164,7 @@ export async function writeBriefToCos({
     return { id: null, skipped: true, reason: source === 'disarmed' ? 'disarmed' : 'no_user_id' };
   }
 
-  const row = {
-    user_id: userId,
-    schema_version: BRIEF_SCHEMA_VERSION,
-    // Required for CoS's reader to select it at all.
-    generation_mode: 'ai',
-    model,
-    input_fingerprint: fingerprint(minimizedInput),
-    structured_output: brief,
-    source_refs: collectSourceRefs(brief),
-    status: 'ok',
-    // status='ok' ⇒ error_category MUST stay null (today_briefs_error_has_category).
-    latency_bucket: latencyBucket(latencyMs),
-    token_bucket: tokenBucket(tokens),
-    generated_at: now.toISOString(),
-    expires_at: new Date(now.getTime() + BRIEF_TTL_MS).toISOString(),
-  };
-
+  const row = buildBriefRow({ userId, brief, minimizedInput, model, latencyMs, tokens, now });
   const { id, error, disarmed } = await cosInsertTodayBrief(row, { env });
   if (disarmed) return { id: null, skipped: true, reason: 'disarmed' };
   if (error) return { id: null, skipped: true, reason: 'write_failed' };
