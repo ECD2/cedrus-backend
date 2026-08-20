@@ -49,12 +49,37 @@ export const COS_LIMITS = Object.freeze({
 // three-week-old message would be lying about its own name.
 export const EMAIL_LOOKBACK_HOURS = 36;
 
+/**
+ * EVERY column this reader asks CoS for, as DATA rather than eight inline
+ * strings.
+ *
+ * Made introspectable on 2026-08-20 after the reader requested
+ * agent_runs.report_body — a column CoS does not have (it is original_body) —
+ * and every read of that table failed with 42703 the first time rung 1 ran
+ * against production. The suite could not have caught it: the reader, the
+ * composer and the test fixture were all written from the same reading of CoS,
+ * so all three agreed with each other and all three were wrong.
+ *
+ * A local test cannot detect that class of error. Only a comparison against the
+ * real schema can, which is what test/cos-schema-check.mjs does with this map.
+ */
+export const READER_COLUMNS = Object.freeze({
+  workstreams: Object.freeze(['id', 'name', 'status', 'priority', 'health', 'objective', 'current_stage', 'next_action', 'target_date', 'archived_at', 'created_at']),
+  open_loops: Object.freeze(['id', 'title', 'status', 'priority', 'waiting_on', 'next_action', 'due_at', 'workstream_id', 'created_at']),
+  decisions: Object.freeze(['id', 'question', 'status', 'recommendation', 'recommendation_source', 'decided_at', 'workstream_id', 'created_at']),
+  captures: Object.freeze(['id', 'original_text', 'proposed_type', 'proposed_priority', 'proposed_workstream', 'decision_candidate', 'open_loop_candidate', 'created_at']),
+  agent_runs: Object.freeze(['id', 'agent', 'model', 'objective', 'verification_state', 'unresolved_findings', 'recommended_next_action', 'original_body', 'created_at']),
+  email_messages: Object.freeze(['id', 'subject', 'sender_name', 'sender_address', 'original_recipient', 'received_at', 'plain_text_excerpt', 'classification_status', 'owner_review_status', 'has_attachments', 'is_demo']),
+  email_ai_analyses: Object.freeze(['id', 'email_message_id', 'status', 'generation_mode', 'suggested_classification', 'suggested_priority', 'suggested_action_status', 'summary', 'suggested_next_action', 'suggested_promotion_type', 'risks_or_uncertainties', 'confidence', 'created_at']),
+  today_briefs: Object.freeze(['id', 'schema_version', 'generation_mode', 'model', 'status', 'generated_at']),
+});
+
 export async function readWorkstreams(opts = {}) {
   return cosSelect('workstreams', (q) => q
     .order('created_at', { ascending: false })
     .limit(COS_LIMITS.workstreams), {
     ...opts,
-    columns: 'id, name, status, priority, health, objective, current_stage, next_action, target_date, archived_at, created_at',
+    columns: READER_COLUMNS.workstreams.join(', '),
   });
 }
 
@@ -63,7 +88,7 @@ export async function readOpenLoops(opts = {}) {
     .order('created_at', { ascending: false })
     .limit(COS_LIMITS.open_loops), {
     ...opts,
-    columns: 'id, title, status, priority, waiting_on, next_action, due_at, workstream_id, created_at',
+    columns: READER_COLUMNS.open_loops.join(', '),
   });
 }
 
@@ -72,7 +97,7 @@ export async function readDecisions(opts = {}) {
     .order('created_at', { ascending: false })
     .limit(COS_LIMITS.decisions), {
     ...opts,
-    columns: 'id, question, status, recommendation, recommendation_source, decided_at, workstream_id, created_at',
+    columns: READER_COLUMNS.decisions.join(', '),
   });
 }
 
@@ -81,7 +106,7 @@ export async function readCaptures(opts = {}) {
     .order('created_at', { ascending: false })
     .limit(COS_LIMITS.captures), {
     ...opts,
-    columns: 'id, original_text, proposed_type, proposed_priority, proposed_workstream, decision_candidate, open_loop_candidate, created_at',
+    columns: READER_COLUMNS.captures.join(', '),
   });
 }
 
@@ -90,7 +115,7 @@ export async function readAgentRuns(opts = {}) {
     .order('created_at', { ascending: false })
     .limit(COS_LIMITS.agent_runs), {
     ...opts,
-    columns: 'id, agent, model, objective, verification_state, unresolved_findings, recommended_next_action, original_body, created_at',
+    columns: READER_COLUMNS.agent_runs.join(', '),
   });
 }
 
@@ -107,7 +132,7 @@ export async function readEmailMessages({ now = new Date(), ...opts } = {}) {
     .order('received_at', { ascending: false })
     .limit(COS_LIMITS.email_messages), {
     ...opts,
-    columns: 'id, subject, sender_name, sender_address, original_recipient, received_at, plain_text_excerpt, classification_status, owner_review_status, has_attachments, is_demo',
+    columns: READER_COLUMNS.email_messages.join(', '),
   });
 }
 
@@ -126,7 +151,7 @@ export async function readEmailAnalyses(opts = {}) {
     .order('created_at', { ascending: false })
     .limit(COS_LIMITS.email_ai_analyses), {
     ...opts,
-    columns: 'id, email_message_id, status, generation_mode, suggested_classification, suggested_priority, suggested_action_status, summary, suggested_next_action, suggested_promotion_type, risks_or_uncertainties, confidence, created_at',
+    columns: READER_COLUMNS.email_ai_analyses.join(', '),
   });
 }
 
@@ -140,7 +165,7 @@ export async function readRecentBriefs({ limit = 5, ...opts } = {}) {
     .order('generated_at', { ascending: false })
     .limit(limit), {
     ...opts,
-    columns: 'id, schema_version, generation_mode, model, status, generated_at',
+    columns: READER_COLUMNS.today_briefs.join(', '),
   });
 }
 
