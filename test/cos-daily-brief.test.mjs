@@ -47,6 +47,8 @@ process.env.TWILIO_ACCOUNT_SID = 'ACtest';
 process.env.TWILIO_AUTH_TOKEN = 'test-token';
 process.env.TWILIO_FROM_NUMBER = '+15550000000';
 
+import { readFileSync } from 'node:fs';
+
 // DYNAMIC imports, deliberately. Static `import` is hoisted and evaluated
 // BEFORE the process.env assignments above, so config.js's required() would
 // abort the suite with "missing required env var SUPABASE_URL". Bundles 36 and
@@ -87,7 +89,7 @@ function rawData(over = {}) {
     open_loops: [{ id: IDS.loop, title: 'Confirm venue', status: 'open', priority: 'high', due_at: '2026-08-16T00:00:00Z', workstream_id: IDS.ws, created_at: '2026-08-15T00:00:00Z' }],
     decisions: [{ id: IDS.dec, question: 'Miami or NYC?', status: 'open', recommendation: 'Miami', recommendation_source: 'agent', created_at: '2026-08-15T00:00:00Z' }],
     captures: [{ id: IDS.cap, original_text: SECRET_BODY + ' '.repeat(5) + 'x'.repeat(600), created_at: '2026-08-17T00:00:00Z' }],
-    agent_runs: [{ id: IDS.run, agent: 'scout', model: 'gpt', objective: 'survey', verification_state: 'self_reported', unresolved_findings: ['unclear'], report_body: SECRET_BODY + 'y'.repeat(600), created_at: '2026-08-17T00:00:00Z' }],
+    agent_runs: [{ id: IDS.run, agent: 'scout', model: 'gpt', objective: 'survey', verification_state: 'self_reported', unresolved_findings: ['unclear'], original_body: SECRET_BODY + 'y'.repeat(600), created_at: '2026-08-17T00:00:00Z' }],
     email_messages: [{ id: IDS.mail, subject: 'Invoice overdue', sender_address: 'ap@vendor.test', original_recipient: 'support@cedrus.life', received_at: '2026-08-17T06:00:00Z', plain_text_excerpt: SECRET_BODY + 'z'.repeat(600), classification_status: 'unclassified', owner_review_status: 'unreviewed', has_attachments: false, is_demo: false }],
     email_ai_analyses: [{ id: IDS.anal, email_message_id: IDS.mail, status: 'completed', generation_mode: 'ai', suggested_classification: 'needs_response', suggested_priority: 'high', summary: 'Vendor wants payment', risks_or_uncertainties: ['amount unverified'], confidence: 0.7, created_at: '2026-08-17T06:05:00Z' }],
     ...over,
@@ -328,7 +330,7 @@ section('input bounding — 240-char excerpts, 24k total, captures trimmed first
   const many = (n, f) => Array.from({ length: n }, (_, i) => f(i));
   const big = rawData({
     captures: many(60, (i) => ({ id: `c${i}`, original_text: 'c'.repeat(240), created_at: '2026-08-17T00:00:00Z' })),
-    agent_runs: many(60, (i) => ({ id: `r${i}`, agent: 'a', verification_state: 'self_reported', report_body: 'r'.repeat(240), created_at: '2026-08-17T00:00:00Z' })),
+    agent_runs: many(60, (i) => ({ id: `r${i}`, agent: 'a', verification_state: 'self_reported', original_body: 'r'.repeat(240), created_at: '2026-08-17T00:00:00Z' })),
     email_messages: many(60, (i) => ({ id: `m${i}`, subject: 's', plain_text_excerpt: 'm'.repeat(240), received_at: '2026-08-17T06:00:00Z' })),
     open_loops: many(60, (i) => ({ id: `l${i}`, title: 'loop ' + i, status: 'open', priority: 'high', created_at: '2026-08-15T00:00:00Z' })),
   });
@@ -498,6 +500,53 @@ section('dry run composes but does not send, write, or consume the day');
   ok('dry run sent NOTHING', sends.length === 0, sends.length);
   ok('dry run wrote NOTHING back to CoS', written.length === 0, written.length);
   ok('dry run did NOT consume the day\'s ledger slot', db.rows.size === 0, [...db.rows.keys()]);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section('agent_runs excerpt column — regression pin for the 2026-08-20 incident');
+{
+  // The reader asked CoS for 'report_body'. CoS's column is 'original_body'
+  // (its own minimizeInput reads s(r.original_body)). Every read of agent_runs
+  // failed with 42703 the first time rung 1 ran against production.
+  //
+  // BE CLEAR ABOUT WHAT THIS PIN CAN AND CANNOT DO. It cannot detect the bug
+  // that actually happened: the reader requested report_body, the composer read
+  // r.report_body, and the FIXTURE supplied report_body — all three agreed with
+  // each other and all three were wrong. No test written from the same
+  // assumption as the code can catch that; only a read against the real schema
+  // can, which is what the live-schema battery stage exists for.
+  //
+  // What this pin does catch is a naive revert to the old name, and it records
+  // the incident where someone changing this line will see it.
+  const readerSrc = readFileSync(new URL('../src/services/cos/reader.js', import.meta.url), 'utf8');
+  const composeSrc = readFileSync(new URL('../src/services/cos/compose.js', import.meta.url), 'utf8');
+  ok('reader requests original_body for agent_runs', readerSrc.includes('original_body'), 'missing');
+  ok('reader no longer requests report_body', !readerSrc.includes('report_body'), 'still present');
+  ok('composer reads r.original_body', composeSrc.includes('str(r.original_body)'), 'missing');
+  ok('composer no longer reads r.report_body', !composeSrc.includes('r.report_body'), 'still present');
+
+  // And the behaviour, not just the strings: a row carrying original_body must
+  // produce an excerpt.
+  const withBody = compose.minimizeInput({
+    workstreams: [], open_loops: [], decisions: [], captures: [],
+    agent_runs: [{ id: IDS.run, agent: 'scout', verification_state: 'self_reported',
+                   original_body: 'x'.repeat(600), created_at: '2026-08-17T00:00:00Z' }],
+    email_messages: [], email_ai_analyses: [],
+  }, Date.parse('2026-08-17T11:00:00Z'));
+  ok('an agent_run with original_body yields a bounded excerpt',
+    withBody.agent_runs[0].excerpt && withBody.agent_runs[0].excerpt.length <= 240,
+    withBody.agent_runs[0].excerpt);
+
+  // CONTROL: the OLD column name must now produce NO excerpt. Without this, the
+  // assertion above would also pass if minimizeInput read both names.
+  const withOld = compose.minimizeInput({
+    workstreams: [], open_loops: [], decisions: [], captures: [],
+    agent_runs: [{ id: IDS.run, agent: 'scout', verification_state: 'self_reported',
+                   report_body: 'x'.repeat(600), created_at: '2026-08-17T00:00:00Z' }],
+    email_messages: [], email_ai_analyses: [],
+  }, Date.parse('2026-08-17T11:00:00Z'));
+  ok('CONTROL: a row with the OLD column name yields no excerpt',
+    withOld.agent_runs[0].excerpt === undefined, withOld.agent_runs[0].excerpt);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

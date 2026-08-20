@@ -102,7 +102,7 @@ export function isOverdue(dueAt, status, now) {
  * Everything not listed below stays in the CoS database. Most importantly:
  * no user ids, no auth or MFA state, no credentials, no audit rows, no raw
  * MIME, no HTML, no attachment metadata, and never a full original_text or
- * report_body. Archived workstreams and settled loops are dropped as noise —
+ * original_body. Archived workstreams and settled loops are dropped as noise —
  * the same filter CoS applies.
  *
  * `includeExcerpts=false` produces a metadata-only payload: counts and
@@ -181,7 +181,7 @@ export function minimizeInput(raw, now = Date.now(), includeExcerpts = true) {
       created_at: String(r.created_at ?? ''),
     };
     if (includeExcerpts) {
-      const excerpt = clamp(str(r.report_body), LIMITS.agent_excerpt_chars);
+      const excerpt = clamp(str(r.original_body), LIMITS.agent_excerpt_chars);
       if (excerpt) row.excerpt = excerpt;
     }
     return row;

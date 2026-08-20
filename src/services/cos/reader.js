@@ -90,7 +90,7 @@ export async function readAgentRuns(opts = {}) {
     .order('created_at', { ascending: false })
     .limit(COS_LIMITS.agent_runs), {
     ...opts,
-    columns: 'id, agent, model, objective, verification_state, unresolved_findings, recommended_next_action, report_body, created_at',
+    columns: 'id, agent, model, objective, verification_state, unresolved_findings, recommended_next_action, original_body, created_at',
   });
 }
 
