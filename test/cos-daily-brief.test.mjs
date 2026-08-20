@@ -372,6 +372,47 @@ section('no prompt, no raw response, no full body is ever written');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+section('the writeback row — a contract with CoS\'s own persist()');
+{
+  const writer = await import('../src/services/cos/writer.js');
+  const input = compose.enforceTotalSize(compose.minimizeInput(rawData(), Date.parse('2026-08-17T11:00:00Z')));
+  const v = compose.validateBrief(briefCiting([{ type: 'open_loop', id: IDS.loop }]), input);
+  const row = writer.buildBriefRow({
+    userId: 'cos-owner-uuid', brief: v.brief, minimizedInput: input,
+    model: 'gpt-4.1-mini', latencyMs: 8633, tokens: 2029,
+    now: new Date('2026-08-20T19:17:56.164Z'),
+  });
+
+  // generated_at belongs to the CoS DATABASE. Writing it from this runtime put
+  // a 29-second falsehood in the 2026-08-20 row, and latestStoredBrief() orders
+  // by that column.
+  ok('generated_at is NOT in the row', !('generated_at' in row), Object.keys(row));
+
+  // CONTROL: expires_at IS still set from this clock, because CoS does the same.
+  // Without this, "generated_at absent" would also pass if the builder had
+  // simply stopped emitting timestamps altogether.
+  ok('CONTROL: expires_at IS set (CoS computes it the same way)',
+    row.expires_at === '2026-08-21T07:17:56.164Z', row.expires_at);
+
+  // Every column CoS's own persist() writes, present and correctly shaped.
+  ok('generation_mode is ai (or the app never selects it)', row.generation_mode === 'ai');
+  ok('schema_version matches', row.schema_version === 'today_brief_v1');
+  ok('model is carried', row.model === 'gpt-4.1-mini');
+  ok('input_fingerprint is a sha256 hex digest', /^[0-9a-f]{64}$/.test(row.input_fingerprint), row.input_fingerprint);
+  ok('structured_output is the validated brief', row.structured_output === v.brief);
+  ok('source_refs is an array', Array.isArray(row.source_refs));
+  ok('status ok', row.status === 'ok');
+  ok('error_category absent (status=ok ⇒ must be null)', !('error_category' in row));
+  ok('latency_bucket uses CoS buckets', row.latency_bucket === '5-15s', row.latency_bucket);
+  ok('token_bucket uses CoS buckets', row.token_bucket === '1-5k', row.token_bucket);
+
+  // The exact column set, so an accidental addition or removal is caught.
+  const expected = ['user_id','schema_version','generation_mode','model','input_fingerprint',
+    'structured_output','source_refs','status','latency_bucket','token_bucket','expires_at'];
+  ok('the row has EXACTLY the CoS column set', JSON.stringify(Object.keys(row).sort()) === JSON.stringify(expected.sort()), Object.keys(row));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 section('the ledger blocks a double send');
 {
   reset();
