@@ -263,6 +263,13 @@ export function minimizeInput(raw, now = Date.now(), includeExcerpts = true) {
     today: new Date(now).toISOString().slice(0, 10),
     workstreams, open_loops, decisions, captures, agent_runs,
     email_messages, email_ai_analyses,
+    // Carried so the brief can state its own blind spot. Defaults to "saw
+    // everything" when a caller does not supply it, so an omission reads as no
+    // truncation rather than as an unknown.
+    email_selection: raw.email_selection || {
+      considered: email_messages.length, total: email_messages.length,
+      truncated: false, total_is_floor: false,
+    },
   };
 }
 
@@ -289,6 +296,7 @@ export function minimizeInput(raw, now = Date.now(), includeExcerpts = true) {
  * hangs on and it is already capped at 25 rows by the reader.
  */
 export function enforceTotalSize(input) {
+  // email_selection is a scalar record, never an array, so no trim order touches it.
   const order = ['captures', 'agent_runs', 'decisions', 'email_ai_analyses', 'email_messages', 'open_loops'];
   const out = { ...input };
   for (const key of order) {
@@ -537,6 +545,10 @@ export function validateBrief(raw, input, now = new Date()) {
       ...b,
       // Ours, not the model's, so it cannot be softened or dropped.
       model_disclaimer: MODEL_DISCLAIMER,
+      // Same reasoning applied to the brief's own blind spot. Asking the model
+      // to mention truncation would make the disclosure optional — it can
+      // forget, compress, or judge it unimportant. Appended here it cannot.
+      not_enough_evidence: withEmailTruncationNote(b.not_enough_evidence, input.email_selection),
       // Same reasoning, and it is not hypothetical: on the 2026-08-20 run the
       // model emitted generated_at "2026-08-20T12:00:00Z" for a brief composed
       // at 19:17Z. It passed validation, because the schema only requires the
@@ -555,6 +567,24 @@ export function validateBrief(raw, input, now = new Date()) {
       source_system: 'cedrus',
     },
   };
+}
+
+/**
+ * Append the reader's blind spot to not_enough_evidence, in words.
+ *
+ * "20 of 63 messages considered" belongs in this section specifically: it is
+ * not a risk and not a priority, it is a statement about evidence the brief did
+ * not see. Stated deterministically because a silent 68% blind spot presented
+ * as a complete brief is the failure this exists to prevent.
+ */
+export function withEmailTruncationNote(list, selection) {
+  const out = Array.isArray(list) ? [...list] : [];
+  if (!selection || !selection.truncated) return out;
+  const total = selection.total_is_floor ? `at least ${selection.total}` : String(selection.total);
+  out.push(
+    `Only ${selection.considered} of ${total} eligible email messages were considered, ` +
+    'chosen by what still needs attention rather than by recency; the rest were not read.');
+  return out;
 }
 
 /** Every distinct ref the validated brief cites, for the `source_refs` column. */
