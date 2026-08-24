@@ -56,6 +56,7 @@ process.env.TWILIO_FROM_NUMBER = '+15550000000';
 const { runCosDailyBrief, isDryRun, isWritebackOnly, briefMode, briefModel } = await import('../src/jobs/cosDailyBrief.js');
 const { guard, JOB_REGISTRY } = await import('../src/jobs/scheduler.js');
 const compose = await import('../src/services/cos/compose.js');
+const reader = await import('../src/services/cos/reader.js');
 const ledger = await import('../src/services/cos/ledger.js');
 const clientMod = await import('../src/services/cos/client.js');
 const readerCols = await import('../src/services/cos/reader.js');
@@ -329,6 +330,116 @@ section('contract — the CoS today_brief_v1 shape is honoured');
   ok('schema exposes all 5 CoS ref types', ['workstream', 'open_loop', 'decision', 'capture', 'agent_run'].every((t) => enumTypes.includes(t)), enumTypes);
   ok('schema exposes both email ref types', enumTypes.includes('email_message') && enumTypes.includes('email_analysis'), enumTypes);
   ok('schema caps priorities at 3', schema.properties.top_priorities.maxItems === 3);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section('email selection — attention first, recency last');
+{
+  // Shapes taken from the seven real rows in CoS on 2026-08-21. Three are
+  // unreviewed and ~152h old; four were dismissed by the owner in July, one of
+  // them 'urgent'. The old reader saw NONE of them: a 36h window excluded every
+  // one, so the brief silently contained zero email on every run.
+  const REAL = [
+    { id: 'a', received_at: '2026-08-17T19:09:23Z', action_status: 'unreviewed', triage_priority: 'normal', subject: 'TEST' },
+    { id: 'b', received_at: '2026-08-17T18:50:28Z', action_status: 'unreviewed', triage_priority: 'normal', subject: 'Gmail Forwarding Confirmation' },
+    { id: 'c', received_at: '2026-08-17T17:54:17Z', action_status: 'unreviewed', triage_priority: 'normal', subject: 'TEST' },
+    { id: 'd', received_at: '2026-07-14T23:41:51Z', action_status: 'dismissed',  triage_priority: 'low',    subject: 'TEST' },
+    { id: 'e', received_at: '2026-07-14T22:37:11Z', action_status: 'dismissed',  triage_priority: 'high',   subject: 'routing test' },
+    { id: 'f', received_at: '2026-07-14T22:35:03Z', action_status: 'dismissed',  triage_priority: 'urgent', subject: 'routing test' },
+    { id: 'g', received_at: '2026-07-14T22:02:45Z', action_status: 'dismissed',  triage_priority: 'low',    subject: 'Welcome to Purelymail' },
+  ];
+  const { selected, eligibleTotal } = reader.selectEmailMessages(REAL, 20);
+  const ids = selected.map((r) => r.id);
+
+  ok('the three unreviewed rows ARE selected despite being ~152h old',
+    ids.includes('a') && ids.includes('b') && ids.includes('c'), ids);
+  ok('dismissed rows are never surfaced, even the urgent one',
+    !ids.includes('d') && !ids.includes('e') && !ids.includes('f') && !ids.includes('g'), ids);
+  ok('eligible total counts only the unsettled rows', eligibleTotal === 3, eligibleTotal);
+
+  // Ordering: action state beats priority, priority beats recency.
+  const MIX = [
+    { id: 'old_action', received_at: '2026-01-01T00:00:00Z', action_status: 'action_needed', triage_priority: 'low' },
+    { id: 'new_reviewed', received_at: '2026-08-21T00:00:00Z', action_status: 'reviewed', triage_priority: 'low' },
+    { id: 'urgent_unrev', received_at: '2026-02-01T00:00:00Z', action_status: 'unreviewed', triage_priority: 'urgent' },
+    { id: 'normal_unrev', received_at: '2026-08-20T00:00:00Z', action_status: 'unreviewed', triage_priority: 'normal' },
+  ];
+  const order = reader.selectEmailMessages(MIX, 20).selected.map((r) => r.id);
+  ok('action_needed outranks everything, however old', order[0] === 'old_action', order);
+  ok('within unreviewed, urgent beats a newer normal', order[1] === 'urgent_unrev' && order[2] === 'normal_unrev', order);
+  ok('a newer REVIEWED message ranks last, not first', order[3] === 'new_reviewed', order);
+
+  // CONTROL: recency is still the tie-break, so equal rows are newest-first.
+  const TIE = [
+    { id: 'older', received_at: '2026-08-01T00:00:00Z', action_status: 'unreviewed', triage_priority: 'normal' },
+    { id: 'newer', received_at: '2026-08-20T00:00:00Z', action_status: 'unreviewed', triage_priority: 'normal' },
+  ];
+  ok('CONTROL: recency still breaks ties within a tier',
+    reader.selectEmailMessages(TIE, 20).selected.map((r) => r.id).join() === 'newer,older');
+
+  // The cap applies AFTER ranking, so what survives is what matters.
+  const MANY = Array.from({ length: 40 }, (_, i) => ({
+    id: 'm' + i, received_at: '2026-08-0' + (i % 9 + 1) + 'T00:00:00Z',
+    action_status: i === 39 ? 'action_needed' : 'reviewed', triage_priority: 'normal',
+  }));
+  const capped = reader.selectEmailMessages(MANY, 20);
+  ok('the cap keeps 20', capped.selected.length === 20, capped.selected.length);
+  ok('the one action_needed row survives a 40-row cull', capped.selected[0].id === 'm39', capped.selected[0].id);
+  ok('eligibleTotal reports the true eligible count, not the cap', capped.eligibleTotal === 40, capped.eligibleTotal);
+
+  ok('the lookback matches the daily cron cadence', reader.EMAIL_LOOKBACK_HOURS === 24, reader.EMAIL_LOOKBACK_HOURS);
+
+  // The ranker keys off action_status and triage_priority. If the reader does
+  // not REQUEST those columns they arrive undefined, every row ranks equal, and
+  // the ordering silently degrades to input order — with no error anywhere.
+  // Both column generations exist in CoS, so the live-schema battery stage
+  // cannot catch this: classification_status is a real column, just the stale
+  // one. Coupling the two lists is the only thing that can.
+  const RANKED_ON = ['action_status', 'triage_priority', 'received_at'];
+  for (const f of RANKED_ON) {
+    ok(`the reader REQUESTS the column it ranks on: ${f}`,
+      reader.READER_COLUMNS.email_messages.includes(f), reader.READER_COLUMNS.email_messages);
+  }
+  // And the stale generation is deliberately not requested: prod row 0f8ea600
+  // reads triage_priority='urgent' while classification_status='unclassified',
+  // so reading the old pair tells the brief the wrong thing about every row.
+  ok('the STALE column pair is not requested',
+    !reader.READER_COLUMNS.email_messages.includes('classification_status') &&
+    !reader.READER_COLUMNS.email_messages.includes('owner_review_status'),
+    reader.READER_COLUMNS.email_messages);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section('truncation is announced, never silent');
+{
+  const input = compose.enforceTotalSize(compose.minimizeInput(rawData(), Date.parse('2026-08-17T11:00:00Z')));
+  const refs = [{ type: 'open_loop', id: IDS.loop }];
+
+  const truncated = { ...input, email_selection: { considered: 20, total: 63, truncated: true, total_is_floor: false } };
+  const v = compose.validateBrief(briefCiting(refs, { not_enough_evidence: ['something else'] }), truncated);
+  const note = v.brief.not_enough_evidence.join(' | ');
+  ok('the brief states how many of how many were considered', /20 of 63/.test(note), note);
+  ok('...and says the rest were not read', /not read/.test(note), note);
+  ok('the model\'s own not_enough_evidence entries survive alongside it',
+    v.brief.not_enough_evidence.includes('something else'), v.brief.not_enough_evidence);
+
+  // The model cannot suppress it by returning an empty section.
+  const emptied = compose.validateBrief(briefCiting(refs, { not_enough_evidence: [] }), truncated);
+  ok('a model returning NO evidence gaps still gets the truncation note',
+    /20 of 63/.test(emptied.brief.not_enough_evidence.join(' ')), emptied.brief.not_enough_evidence);
+
+  // CONTROL: no truncation ⇒ no note. Otherwise every brief would claim one.
+  const whole = { ...input, email_selection: { considered: 7, total: 7, truncated: false, total_is_floor: false } };
+  const clean = compose.validateBrief(briefCiting(refs, { not_enough_evidence: [] }), whole);
+  ok('CONTROL: nothing truncated ⇒ no note invented', clean.brief.not_enough_evidence.length === 0, clean.brief.not_enough_evidence);
+
+  // A floored total must not be presented as exact.
+  const floored = { ...input, email_selection: { considered: 20, total: 200, truncated: true, total_is_floor: true } };
+  const f = compose.validateBrief(briefCiting(refs), floored);
+  ok('a floored total says "at least"', /at least 200/.test(f.brief.not_enough_evidence.join(' ')), f.brief.not_enough_evidence);
+
+  ok('withEmailTruncationNote tolerates a missing selection',
+    compose.withEmailTruncationNote(['x'], undefined).join() === 'x');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

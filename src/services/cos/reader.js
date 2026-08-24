@@ -47,7 +47,64 @@ export const COS_LIMITS = Object.freeze({
 
 // How far back the email window reaches. A "daily" brief that surfaced a
 // three-week-old message would be lying about its own name.
-export const EMAIL_LOOKBACK_HOURS = 36;
+// Matched to the cron cadence (0 11 * * * — every 24h). It was 36, which on a
+// daily schedule re-shows a 12-hour band in two consecutive briefs: yesterday's
+// evening mail appears again this morning as if it were new.
+//
+// Tightening it costs nothing, because the lookback NO LONGER DECIDES WHAT IS
+// VISIBLE. It only defines the "arrived since the last brief" tier. Anything
+// needing attention — unreviewed, action_needed, urgent, high — is selected
+// regardless of age (see selectEmailMessages), so a message can no longer fall
+// out of the brief simply by getting old. That was the real defect: all seven
+// rows in CoS are 6 to 40 days old, so a 36-hour window showed the brief
+// exactly zero email, every run, silently.
+export const EMAIL_LOOKBACK_HOURS = 24;
+
+/**
+ * Action states meaning "the owner has already dealt with this". Never
+ * surfaced — resurfacing dismissed mail is the system arguing with its owner,
+ * the same reasoning readEmailAnalyses applies to dismissed analyses.
+ */
+export const SETTLED_ACTION_STATUS = Object.freeze(['dismissed', 'resolved']);
+
+/** Age-independent: these are selected however old they are. */
+export const ATTENTION_ACTION_STATUS = Object.freeze(['action_needed', 'unreviewed']);
+export const ATTENTION_TRIAGE_PRIORITY = Object.freeze(['urgent', 'high']);
+
+/**
+ * How many candidate rows are pulled before ranking. Ranking cannot promote a
+ * row it never saw, so this is deliberately an order of magnitude above the
+ * 20-row output cap. If the eligible total ever exceeds it, the shortfall is
+ * announced rather than hidden — see gatherCosInput's email_selection.
+ */
+export const EMAIL_CANDIDATE_POOL = 200;
+
+const ACTION_RANK = { action_needed: 0, unreviewed: 1, waiting: 2, reviewed: 3 };
+const PRIORITY_RANK = { urgent: 0, high: 1, normal: 2, low: 3 };
+
+/**
+ * Rank and cap. PURE — no I/O, so the ordering is unit-testable and
+ * mutation-testable rather than buried in a PostgREST clause.
+ *
+ * Order, and why:
+ *   1. action_status   what the owner still has to do beats what they have seen
+ *   2. triage_priority urgent before normal within the same action state
+ *   3. received_at     newest first, as the tie-break only
+ *
+ * Recency is LAST on purpose. It was previously first and only, which is how a
+ * six-day-old unreviewed message lost to nothing at all.
+ */
+export function selectEmailMessages(rows, limit = COS_LIMITS.email_messages) {
+  const eligible = (rows || []).filter((r) => !SETTLED_ACTION_STATUS.includes(r.action_status));
+  const ranked = [...eligible].sort((a, b) => {
+    const ar = (ACTION_RANK[a.action_status] ?? 9) - (ACTION_RANK[b.action_status] ?? 9);
+    if (ar !== 0) return ar;
+    const pr = (PRIORITY_RANK[a.triage_priority] ?? 9) - (PRIORITY_RANK[b.triage_priority] ?? 9);
+    if (pr !== 0) return pr;
+    return new Date(b.received_at || 0) - new Date(a.received_at || 0);
+  });
+  return { selected: ranked.slice(0, limit), eligibleTotal: ranked.length };
+}
 
 /**
  * EVERY column this reader asks CoS for, as DATA rather than eight inline
@@ -69,7 +126,13 @@ export const READER_COLUMNS = Object.freeze({
   decisions: Object.freeze(['id', 'question', 'status', 'recommendation', 'recommendation_source', 'decided_at', 'workstream_id', 'created_at']),
   captures: Object.freeze(['id', 'original_text', 'proposed_type', 'proposed_priority', 'proposed_workstream', 'decision_candidate', 'open_loop_candidate', 'created_at']),
   agent_runs: Object.freeze(['id', 'agent', 'model', 'objective', 'verification_state', 'unresolved_findings', 'recommended_next_action', 'original_body', 'created_at']),
-  email_messages: Object.freeze(['id', 'subject', 'sender_name', 'sender_address', 'original_recipient', 'received_at', 'plain_text_excerpt', 'classification_status', 'owner_review_status', 'has_attachments', 'is_demo']),
+  // NOTE the triage columns, not classification_status / owner_review_status.
+  // Those are an earlier generation and they are STALE: row 0f8ea600 in prod
+  // carries classification='support', triage_priority='urgent' while its legacy
+  // classification_status still reads 'unclassified'. The reader was reading the
+  // stale pair, so even had the window found these rows, the brief would have
+  // been told the wrong thing about every one of them.
+  email_messages: Object.freeze(['id', 'subject', 'sender_name', 'sender_address', 'original_recipient', 'received_at', 'plain_text_excerpt', 'classification', 'triage_priority', 'action_status', 'has_attachments', 'is_demo']),
   email_ai_analyses: Object.freeze(['id', 'email_message_id', 'status', 'generation_mode', 'suggested_classification', 'suggested_priority', 'suggested_action_status', 'summary', 'suggested_next_action', 'suggested_promotion_type', 'risks_or_uncertainties', 'confidence', 'created_at']),
   today_briefs: Object.freeze(['id', 'schema_version', 'generation_mode', 'model', 'status', 'generated_at']),
 });
@@ -125,15 +188,42 @@ export async function readAgentRuns(opts = {}) {
  * attachment_metadata, recipient_addresses, or thread_references: none of them
  * can change a priority, and each is a needless copy of personal data.
  */
+/**
+ * Eligible = not already settled by the owner, AND (needs attention OR arrived
+ * since the last brief). The attention half is age-independent, which is what
+ * stops an old unreviewed message from silently vanishing.
+ *
+ * Returns { rows, error, disarmed, eligibleTotal, poolTruncated } so the caller
+ * can say how much it did NOT look at.
+ */
 export async function readEmailMessages({ now = new Date(), ...opts } = {}) {
   const since = new Date(now.getTime() - EMAIL_LOOKBACK_HOURS * 3600_000).toISOString();
-  return cosSelect('email_messages', (q) => q
-    .gte('received_at', since)
+  const settled = `(${SETTLED_ACTION_STATUS.join(',')})`;
+  const eligible = [
+    `action_status.in.(${ATTENTION_ACTION_STATUS.join(',')})`,
+    `triage_priority.in.(${ATTENTION_TRIAGE_PRIORITY.join(',')})`,
+    `received_at.gte.${since}`,
+  ].join(',');
+
+  const narrow = (q) => q.not('action_status', 'in', settled).or(eligible);
+
+  const res = await cosSelect('email_messages', (q) => narrow(q)
     .order('received_at', { ascending: false })
-    .limit(COS_LIMITS.email_messages), {
+    .limit(EMAIL_CANDIDATE_POOL), {
     ...opts,
     columns: READER_COLUMNS.email_messages.join(', '),
   });
+  if (res.disarmed || res.error || !res.rows) return { ...res, eligibleTotal: null, poolTruncated: false };
+
+  const { selected, eligibleTotal } = selectEmailMessages(res.rows, COS_LIMITS.email_messages);
+  return {
+    ...res,
+    rows: selected,
+    eligibleTotal,
+    // The candidate pool itself filled up, so `eligibleTotal` is a floor, not a
+    // count. Announced separately rather than quietly reported as exact.
+    poolTruncated: res.rows.length >= EMAIL_CANDIDATE_POOL,
+  };
 }
 
 /**
@@ -209,8 +299,23 @@ export async function gatherCosInput({ now = new Date(), env = process.env } = {
     return { ok: false, reason: 'read_failed', tables: failed };
   }
 
+  // How much email was NOT looked at. Selecting 20 of 63 and saying nothing is
+  // blindness at 68% presented as a complete brief — Lesson 7 in a new place, so
+  // the shortfall travels with the data instead of being dropped here.
+  const considered = emailMessages.rows.length;
+  const total = emailMessages.eligibleTotal;
+  const email_selection = {
+    considered,
+    total: total === null ? considered : total,
+    truncated: total !== null && total > considered,
+    // eligibleTotal is a floor rather than a count when the candidate pool
+    // itself filled; said plainly so "63" is never read as exact when it isn't.
+    total_is_floor: Boolean(emailMessages.poolTruncated),
+  };
+
   return {
     ok: true,
     data: Object.fromEntries(Object.entries(named).map(([name, r]) => [name, r.rows])),
+    email_selection,
   };
 }

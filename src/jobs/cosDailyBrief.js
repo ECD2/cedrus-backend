@@ -185,7 +185,19 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
     return { ran: false, reason: gathered.reason, sent: false, written: false };
   }
 
-  const minimized = enforceTotalSize(minimizeInput(gathered.data, now.getTime()));
+  // Announce the blind spot in the LOG too, not only inside the brief. If the
+  // model call fails the brief never exists, and the fact that email was
+  // truncated should still be visible in the run's own record (Lesson 7).
+  const sel = gathered.email_selection;
+  if (sel && sel.truncated) {
+    logger.event('cos.email.truncated', {
+      level: 'warn', outcome: 'truncated',
+      considered: sel.considered, eligible_total: sel.total, total_is_floor: sel.total_is_floor,
+      message: `email selection capped: ${sel.considered} of ${sel.total_is_floor ? 'at least ' : ''}${sel.total} eligible messages considered`,
+    });
+  }
+
+  const minimized = enforceTotalSize(minimizeInput({ ...gathered.data, email_selection: sel }, now.getTime()));
   if (isEmptyInput(minimized)) {
     logger.event('cos.brief.empty', {
       outcome: 'no_input',
