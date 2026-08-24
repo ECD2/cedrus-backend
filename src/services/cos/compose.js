@@ -228,8 +228,17 @@ export function minimizeInput(raw, now = Date.now(), includeExcerpts = true) {
       // is often the whole signal about whether something matters today.
       to: clamp(str(m.original_recipient), LIMITS.field_chars),
       received_at: str(m.received_at),
-      classification_status: String(m.classification_status ?? 'unclassified'),
-      owner_review_status: String(m.owner_review_status ?? 'unreviewed'),
+      // The TRIAGE generation, matching READER_COLUMNS.email_messages. These
+      // read classification_status / owner_review_status until 2026-08-24 — an
+      // earlier, stale pair that no longer tracks the triage columns. The
+      // reader was fixed to fetch the right ones and this was missed, so every
+      // row arrived with the fields undefined and silently took the defaults:
+      // the model was told 'unclassified/unreviewed' about a row that is
+      // actually 'support/urgent'. Reader and composer must name the SAME
+      // columns; the suite now couples them.
+      classification: String(m.classification ?? 'unclassified'),
+      triage_priority: String(m.triage_priority ?? 'normal'),
+      action_status: String(m.action_status ?? 'unreviewed'),
       has_attachments: Boolean(m.has_attachments),
       is_demo: Boolean(m.is_demo),
     };

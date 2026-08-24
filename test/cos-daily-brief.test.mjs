@@ -91,7 +91,7 @@ function rawData(over = {}) {
     decisions: [{ id: IDS.dec, question: 'Miami or NYC?', status: 'open', recommendation: 'Miami', recommendation_source: 'agent', created_at: '2026-08-15T00:00:00Z' }],
     captures: [{ id: IDS.cap, original_text: SECRET_BODY + ' '.repeat(5) + 'x'.repeat(600), created_at: '2026-08-17T00:00:00Z' }],
     agent_runs: [{ id: IDS.run, agent: 'scout', model: 'gpt', objective: 'survey', verification_state: 'self_reported', unresolved_findings: ['unclear'], original_body: SECRET_BODY + 'y'.repeat(600), created_at: '2026-08-17T00:00:00Z' }],
-    email_messages: [{ id: IDS.mail, subject: 'Invoice overdue', sender_address: 'ap@vendor.test', original_recipient: 'support@cedrus.life', received_at: '2026-08-17T06:00:00Z', plain_text_excerpt: SECRET_BODY + 'z'.repeat(600), classification_status: 'unclassified', owner_review_status: 'unreviewed', has_attachments: false, is_demo: false }],
+    email_messages: [{ id: IDS.mail, subject: 'Invoice overdue', sender_address: 'ap@vendor.test', original_recipient: 'support@cedrus.life', received_at: '2026-08-17T06:00:00Z', plain_text_excerpt: SECRET_BODY + 'z'.repeat(600), classification: 'support', triage_priority: 'urgent', action_status: 'action_needed', has_attachments: false, is_demo: false }],
     email_ai_analyses: [{ id: IDS.anal, email_message_id: IDS.mail, status: 'completed', generation_mode: 'ai', suggested_classification: 'needs_response', suggested_priority: 'high', summary: 'Vendor wants payment', risks_or_uncertainties: ['amount unverified'], confidence: 0.7, created_at: '2026-08-17T06:05:00Z' }],
     ...over,
   };
@@ -403,6 +403,30 @@ section('email selection — attention first, recency last');
   // And the stale generation is deliberately not requested: prod row 0f8ea600
   // reads triage_priority='urgent' while classification_status='unclassified',
   // so reading the old pair tells the brief the wrong thing about every row.
+  // The composer must read the SAME columns the reader fetches. They drifted
+  // once already: the reader was moved to the triage generation and the
+  // composer left on the stale pair, so every field arrived undefined and
+  // silently took a default — the model was told 'unclassified/unreviewed'
+  // about a row that is really 'support/urgent'. No error, no test failure.
+  {
+    const shaped = compose.minimizeInput({
+      workstreams: [], open_loops: [], decisions: [], captures: [], agent_runs: [],
+      email_ai_analyses: [],
+      email_messages: [{ id: 'e1', subject: 's', received_at: '2026-08-17T06:00:00Z',
+        classification: 'support', triage_priority: 'urgent', action_status: 'action_needed' }],
+    }, Date.parse('2026-08-17T11:00:00Z')).email_messages[0];
+    for (const f of ['classification', 'triage_priority', 'action_status']) {
+      ok(`the composer PASSES THROUGH the real ${f}, not a default`,
+        shaped[f] !== undefined && reader.READER_COLUMNS.email_messages.includes(f), shaped[f]);
+    }
+    ok('a triage-urgent row reaches the model as urgent, not normal',
+      shaped.triage_priority === 'urgent', shaped.triage_priority);
+    ok('an action_needed row reaches the model as action_needed',
+      shaped.action_status === 'action_needed', shaped.action_status);
+    ok('the stale field names are gone from the minimized shape',
+      !('classification_status' in shaped) && !('owner_review_status' in shaped), Object.keys(shaped));
+  }
+
   ok('the STALE column pair is not requested',
     !reader.READER_COLUMNS.email_messages.includes('classification_status') &&
     !reader.READER_COLUMNS.email_messages.includes('owner_review_status'),
