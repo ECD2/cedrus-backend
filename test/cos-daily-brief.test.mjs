@@ -434,6 +434,112 @@ section('email selection — attention first, recency last');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+section('state of the workspace — computed, not asked for');
+{
+  const NOW = Date.parse('2026-08-24T12:00:00Z');
+  const raw = {
+    workstreams: [
+      // past target, no next action, has target_date
+      { id: 'w1', name: 'Admin Panel', status: 'active', priority: 'high', health: 'ok',
+        target_date: '2026-07-23', next_action: null, archived_at: null, created_at: '2026-06-01T00:00:00Z' },
+      // no next action, no target date
+      { id: 'w2', name: 'Cedrus Social', status: 'active', priority: 'low', health: 'ok',
+        target_date: null, next_action: null, archived_at: null, created_at: '2026-06-01T00:00:00Z' },
+      // healthy: has both
+      { id: 'w3', name: 'Affiliate', status: 'active', priority: 'low', health: 'ok',
+        target_date: '2026-12-01', next_action: 'draft the terms', archived_at: null, created_at: '2026-06-01T00:00:00Z' },
+      // ALSO past target, but by less. Two past-target rows are required or
+      // max() and min() are the same value and "furthest by" cannot be wrong —
+      // a mutation flipping max to min stayed green with only one.
+      { id: 'w4', name: 'Second overdue', status: 'active', priority: 'low', health: 'ok',
+        target_date: '2026-08-14', next_action: 'ship it', archived_at: null, created_at: '2026-06-01T00:00:00Z' },
+    ],
+    open_loops: [
+      { id: 'l1', title: 'no due date', status: 'open', priority: 'low', due_at: null, created_at: '2026-08-01T00:00:00Z' },
+      { id: 'l2', title: 'overdue', status: 'open', priority: 'high', due_at: '2026-08-01T00:00:00Z', created_at: '2026-07-01T00:00:00Z' },
+    ],
+    decisions: [], captures: [], agent_runs: [], email_ai_analyses: [],
+    email_messages: [
+      { id: 'm1', subject: 'a', received_at: '2026-08-17T19:09:23Z', action_status: 'unreviewed', triage_priority: 'normal' },
+      { id: 'm2', subject: 'b', received_at: '2026-08-20T00:00:00Z', action_status: 'unreviewed', triage_priority: 'normal' },
+      { id: 'm3', subject: 'c', received_at: '2026-08-21T00:00:00Z', action_status: 'reviewed',   triage_priority: 'normal' },
+    ],
+  };
+  const input = compose.minimizeInput(raw, NOW);
+  const state = compose.computeWorkspaceState(input, NOW);
+  const text = state.join(' | ');
+
+  // Counts must match the SUPPLIED records exactly.
+  ok('counts the unreviewed email, not all email', /2 email messages are unreviewed/.test(text), text);
+  ok('reports the OLDEST unreviewed age (6d, not the 3d one)', /oldest 6 days old/.test(text), text);
+  ok('counts workstreams with no next action', /2 workstreams have no next action/.test(text), text);
+  ok('counts workstreams with no target date', /1 workstream has no target date/.test(text), text);
+  ok('counts workstreams past target with the WORST gap, not the smallest',
+    /2 workstreams are past target, the furthest by 32 days/.test(text), text);
+  ok('counts open loops with no due date', /1 open loop has no due date/.test(text), text);
+  ok('counts overdue open loops', /1 open loop is overdue/.test(text), text);
+  ok('states agent-run silence explicitly', /No agent run appears in the supplied records/.test(text), text);
+
+  // Singular vs plural, because "1 workstreams have" reads as a bug to a human.
+  ok('singular and plural agree', !/\b1 [a-z ]*s (have|are)\b/.test(text), text);
+
+  // Zero-count facts are omitted, not printed as zeroes.
+  const clean = compose.computeWorkspaceState(compose.minimizeInput({
+    workstreams: [{ id: 'x', name: 'ok', status: 'active', priority: 'low', health: 'ok',
+      target_date: '2026-12-01', next_action: 'do it', archived_at: null, created_at: '2026-08-01T00:00:00Z' }],
+    open_loops: [], decisions: [], captures: [], email_messages: [], email_ai_analyses: [],
+    agent_runs: [{ id: 'r', agent: 'a', verification_state: 'self_reported', created_at: '2026-08-24T00:00:00Z' }],
+  }, NOW), NOW);
+  ok('a healthy workspace prints no zero-count noise',
+    !clean.some((l) => /^0 /.test(l)) && clean.length === 1, clean);
+  ok('...and still reports the agent run recency', /agent run was today/.test(clean[0]), clean[0]);
+
+  // THE STRUCTURAL PROPERTY: it can only see what the model saw. Computing from
+  // the minimized input means a count can never describe a record that was
+  // trimmed out of the payload.
+  const trimmed = { ...input, email_messages: [] };
+  const afterTrim = compose.computeWorkspaceState(trimmed, NOW);
+  ok('a record trimmed from the payload is not counted',
+    !/email messages are unreviewed/.test(afterTrim.join(' ')), afterTrim);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section('the state section is surfaced deterministically');
+{
+  const NOW = new Date('2026-08-24T12:00:00Z');
+  const input = compose.enforceTotalSize(compose.minimizeInput(rawData(), NOW.getTime()));
+  const refs = [{ type: 'open_loop', id: IDS.loop }];
+
+  const v = compose.validateBrief(briefCiting(refs, { not_enough_evidence: ['model said this'] }), input, NOW);
+  ok('workspace_state is a first-class field', Array.isArray(v.brief.workspace_state) && v.brief.workspace_state.length > 0, v.brief.workspace_state);
+  ok('the model\'s own evidence entries survive', v.brief.not_enough_evidence.includes('model said this'));
+  ok('the state is MIRRORED into not_enough_evidence, so CoS renders it',
+    v.brief.workspace_state.every((x) => v.brief.not_enough_evidence.includes(x)), v.brief.not_enough_evidence);
+
+  // A model returning nothing cannot suppress it.
+  const emptied = compose.validateBrief(briefCiting(refs, { not_enough_evidence: [] }), input, NOW);
+  ok('a model returning no evidence gaps still gets the state section',
+    emptied.brief.workspace_state.length > 0 && emptied.brief.not_enough_evidence.length > 0, emptied.brief.not_enough_evidence);
+
+  // A model inventing its own workspace_state cannot override ours.
+  const faked = compose.validateBrief(
+    briefCiting(refs, { workspace_state: ['everything is fine, nothing to see'] }), input, NOW);
+  ok('a model-supplied workspace_state is OVERWRITTEN, not trusted',
+    !faked.brief.workspace_state.includes('everything is fine, nothing to see'), faked.brief.workspace_state);
+
+  // The renderer shows it once, not twice.
+  const out = renderBriefEmail(v.brief, NOW);
+  ok('the email renders a State of the workspace section', /STATE OF THE WORKSPACE/.test(out.text), out.text.slice(0, 200));
+  ok('html renders it too', /State of the workspace/.test(out.html));
+  const line = v.brief.workspace_state[0];
+  const occurrences = out.text.split(line).length - 1;
+  ok('each state line appears EXACTLY ONCE in the email, despite the mirror',
+    occurrences === 1, { line, occurrences });
+  ok('the model\'s own gap still renders under Not enough evidence',
+    /NOT ENOUGH EVIDENCE/.test(out.text) && out.text.includes('model said this'), out.text.slice(-400));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 section('truncation is announced, never silent');
 {
   const input = compose.enforceTotalSize(compose.minimizeInput(rawData(), Date.parse('2026-08-17T11:00:00Z')));
@@ -455,7 +561,13 @@ section('truncation is announced, never silent');
   // CONTROL: no truncation ⇒ no note. Otherwise every brief would claim one.
   const whole = { ...input, email_selection: { considered: 7, total: 7, truncated: false, total_is_floor: false } };
   const clean = compose.validateBrief(briefCiting(refs, { not_enough_evidence: [] }), whole);
-  ok('CONTROL: nothing truncated ⇒ no note invented', clean.brief.not_enough_evidence.length === 0, clean.brief.not_enough_evidence);
+  // Assert the absence of the TRUNCATION note specifically, not that the array
+  // is empty: not_enough_evidence also carries the mirrored workspace_state, so
+  // "length === 0" would fail for a reason that has nothing to do with
+  // truncation. Assert on what only this feature can produce.
+  ok('CONTROL: nothing truncated ⇒ no truncation note invented',
+    !clean.brief.not_enough_evidence.some((x) => /eligible email messages were considered/.test(x)),
+    clean.brief.not_enough_evidence);
 
   // A floored total must not be presented as exact.
   const floored = { ...input, email_selection: { considered: 20, total: 200, truncated: true, total_is_floor: true } };

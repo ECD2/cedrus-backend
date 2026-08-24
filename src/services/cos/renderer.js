@@ -39,6 +39,19 @@ function citationLine(refs) {
     .join(' · ');
 }
 
+/**
+ * not_enough_evidence carries a MIRROR of workspace_state, so CoS's unchanged
+ * panel can display it. This renderer shows workspace_state as its own section,
+ * so the mirrored copies must be dropped here or every line appears twice.
+ *
+ * Matched by exact string, which is safe because both come from the same array
+ * in the same object — not from two independent formatters that could drift.
+ */
+export function evidenceWithoutMirror(brief) {
+  const state = new Set(brief.workspace_state || []);
+  return (brief.not_enough_evidence || []).filter((x) => !state.has(x));
+}
+
 export function briefSubject(brief, now = new Date()) {
   const day = now.toISOString().slice(0, 10);
   const top = (brief.top_priorities || [])[0];
@@ -85,7 +98,14 @@ export function renderText(brief, now = new Date()) {
     }
   }
 
-  const gaps = brief.not_enough_evidence || [];
+  const state = brief.workspace_state || [];
+  if (state.length > 0) {
+    L.push('STATE OF THE WORKSPACE');
+    for (const x of state) L.push(`- ${x}`);
+    L.push('');
+  }
+
+  const gaps = evidenceWithoutMirror(brief);
   if (gaps.length > 0) {
     L.push('NOT ENOUGH EVIDENCE');
     for (const g of gaps) L.push(`- ${g}`);
@@ -138,7 +158,14 @@ export function renderHtml(brief, now = new Date()) {
     }
   }
 
-  const gaps = brief.not_enough_evidence || [];
+  const stateLines = brief.workspace_state || [];
+  if (stateLines.length > 0) {
+    P.push('<h2 style="font-size:.8rem;letter-spacing:.06em;text-transform:uppercase;color:#737f45;margin:18px 0 8px">State of the workspace</h2><ul style="margin:0;padding-left:18px">');
+    for (const x of stateLines) P.push(`<li style="font-size:.86rem;margin:0 0 5px">${esc(x)}</li>`);
+    P.push('</ul>');
+  }
+
+  const gaps = evidenceWithoutMirror(brief);
   if (gaps.length > 0) {
     P.push('<h2 style="font-size:.8rem;letter-spacing:.06em;text-transform:uppercase;color:#737f45;margin:18px 0 8px">Not enough evidence</h2><ul style="margin:0;padding-left:18px">');
     for (const g of gaps) P.push(`<li style="font-size:.86rem;margin:0 0 5px;color:#8a8570">${esc(g)}</li>`);

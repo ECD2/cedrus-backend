@@ -435,6 +435,7 @@ export const SYSTEM_RULES = [
   'Email marked is_demo true is synthetic test data. Never let it drive a priority.',
   'Email is evidence of what arrived, not proof that it matters. An unread newsletter is not a priority.',
   'target_date_days_past, overdue_days and age_days are ALREADY COMPUTED for you. Do not do date arithmetic yourself; use these numbers and say them plainly.',
+  'A "state of the workspace" section of aggregate counts is appended to every brief automatically. Do not count records yourself and do not restate those totals; write about what the records MEAN.',
   'A workstream with target_date_days_past set is PAST ITS TARGET by that many days. Say so explicitly — that is the fact, not the target date itself.',
   // The 2026-08-20 run produced three priorities from eight thin records, and
   // the third simply restated a workstream title three times: name ->
@@ -492,6 +493,7 @@ export function buildRequestBody(input, model) {
  * sent is not shown, is not emailed, and is not written back.
  */
 export function validateBrief(raw, input, now = new Date()) {
+  const workspace_state = computeWorkspaceState(input, now.getTime());
   const fail = (detail) => ({ ok: false, category: 'invalid_schema', detail });
   if (typeof raw !== 'object' || raw === null) return fail('response is not an object');
   const b = raw;
@@ -557,7 +559,18 @@ export function validateBrief(raw, input, now = new Date()) {
       // Same reasoning applied to the brief's own blind spot. Asking the model
       // to mention truncation would make the disclosure optional — it can
       // forget, compress, or judge it unimportant. Appended here it cannot.
-      not_enough_evidence: withEmailTruncationNote(b.not_enough_evidence, input.email_selection),
+      // The computed section. First-class so it is machine-readable and can be
+      // rendered on its own; MIRRORED into not_enough_evidence because CoS's
+      // panel renders only summary / top_priorities / risks /
+      // not_enough_evidence / model_disclaimer, and we are not touching CoS.
+      // Without the mirror this block would be invisible in the CoS app.
+      // The Cedrus email renderer de-duplicates so it appears exactly once
+      // there (see renderer.js).
+      workspace_state,
+      not_enough_evidence: [
+        ...withEmailTruncationNote(b.not_enough_evidence, input.email_selection),
+        ...workspace_state,
+      ],
       // Same reasoning, and it is not hypothetical: on the 2026-08-20 run the
       // model emitted generated_at "2026-08-20T12:00:00Z" for a brief composed
       // at 19:17Z. It passed validation, because the schema only requires the
@@ -576,6 +589,80 @@ export function validateBrief(raw, input, now = new Date()) {
       source_system: 'cedrus',
     },
   };
+}
+
+/**
+ * Deterministic aggregate facts about the workspace that NO SINGLE RECORD
+ * CARRIES — the things you can only see by counting across the whole payload.
+ *
+ * The model is not asked to notice any of this. Asking it to count is asking
+ * for the failure already seen twice: it read a target_date and did not notice
+ * the date had passed, and it read three unreviewed messages and mentioned
+ * none of them. Counting is deterministic work; hand over the answer.
+ *
+ * DERIVED FROM THE MINIMIZED INPUT, never from raw rows. That is what makes
+ * "every number reflects records actually supplied" structural rather than a
+ * promise: this function cannot see a record the model was not also given, so
+ * a count can never describe evidence the brief did not have.
+ *
+ * A fact with a zero count is OMITTED. "0 workstreams have no next action" is
+ * noise, and a block of zeroes trains the reader to skip the section.
+ */
+export function computeWorkspaceState(input, now = Date.now()) {
+  const out = [];
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const days = (iso) => {
+    const t = new Date(iso).getTime();
+    return Number.isFinite(t) ? Math.floor((now - t) / 86_400_000) : null;
+  };
+
+  const email = input.email_messages || [];
+  const unreviewed = email.filter((m) => m.action_status === 'unreviewed');
+  if (unreviewed.length > 0) {
+    const ages = unreviewed.map((m) => days(m.received_at)).filter((d) => d !== null);
+    const oldest = ages.length ? Math.max(...ages) : null;
+    out.push(
+      `${plural(unreviewed.length, 'email message is', 'email messages are')} unreviewed` +
+      (oldest !== null ? `, the oldest ${plural(oldest, 'day', 'days')} old.` : '.'));
+  }
+
+  const ws = input.workstreams || [];
+  const noNext = ws.filter((w) => !w.next_action);
+  if (noNext.length > 0) out.push(`${plural(noNext.length, 'workstream has', 'workstreams have')} no next action.`);
+
+  const noTarget = ws.filter((w) => !w.target_date);
+  if (noTarget.length > 0) out.push(`${plural(noTarget.length, 'workstream has', 'workstreams have')} no target date.`);
+
+  const pastTarget = ws.filter((w) => typeof w.target_date_days_past === 'number');
+  if (pastTarget.length > 0) {
+    const worst = Math.max(...pastTarget.map((w) => w.target_date_days_past));
+    out.push(
+      `${plural(pastTarget.length, 'workstream is', 'workstreams are')} past target, ` +
+      `the furthest by ${plural(worst, 'day', 'days')}.`);
+  }
+
+  const loops = input.open_loops || [];
+  const noDue = loops.filter((l) => !l.due_at);
+  if (noDue.length > 0) out.push(`${plural(noDue.length, 'open loop has', 'open loops have')} no due date.`);
+
+  const overdue = loops.filter((l) => l.overdue === true);
+  if (overdue.length > 0) out.push(`${plural(overdue.length, 'open loop is', 'open loops are')} overdue.`);
+
+  // Agent runs: state the SILENCE explicitly. "No agent run in the supplied
+  // records" is a fact about the workspace; omitting it because the array is
+  // empty would make an absent agent indistinguishable from a busy one.
+  const runs = input.agent_runs || [];
+  if (runs.length === 0) {
+    out.push('No agent run appears in the supplied records.');
+  } else {
+    const newest = runs.map((r) => days(r.created_at)).filter((d) => d !== null);
+    if (newest.length) {
+      const d = Math.min(...newest);
+      out.push(d === 0 ? 'The most recent agent run was today.' : `The most recent agent run was ${plural(d, 'day', 'days')} ago.`);
+    }
+  }
+
+  return out;
 }
 
 /**
