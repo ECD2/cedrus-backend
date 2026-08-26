@@ -64,7 +64,7 @@ import { gatherCosInput } from '../services/cos/reader.js';
 import { minimizeInput, enforceTotalSize, isEmptyInput, validateBrief, buildRequestBody } from '../services/cos/compose.js';
 import { renderBriefEmail } from '../services/cos/renderer.js';
 import { createResendTransport, deliveryEnv } from '../services/cos/resendTransport.js';
-import { claimSend, markSent, releaseClaim } from '../services/cos/ledger.js';
+import { claimSend, markSent, releaseClaim, alreadySentToday } from '../services/cos/ledger.js';
 import { writeBriefToCos } from '../services/cos/writer.js';
 
 /** Which model composes the brief. */
@@ -143,6 +143,7 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
     callModel = defaultCallModel,
     transportFactory = createResendTransport,
     claim = claimSend,
+    precheck = alreadySentToday,
     mark = markSent,
     release = releaseClaim,
     write = writeBriefToCos,
@@ -172,6 +173,56 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
       `delivery NOT CONFIGURED — missing: ${delivery.missing.join(', ')}. The brief will be composed and logged only.`,
   }[modeName];
   logger.event('cos.delivery.mode', { outcome: modeName, message: modeMessage });
+
+  // ── pre-check: has today already gone out? ────────────────────────────────
+  //
+  // A READ, before anything is gathered or composed. It does not replace the
+  // atomic claim further down and cannot: another tick can claim the day
+  // between this SELECT and that INSERT. The claim is still the lock, the 23505
+  // collision is still the mechanism, and the race window is still real — which
+  // is why the suite's double-send test drives this open on purpose.
+  //
+  // It exists for cost. Before it, a second tick after a completed send read
+  // eight CoS tables and paid for a full billable model call before the ledger
+  // told it no.
+  //
+  // LIVE ONLY. A dry run and a writeback-only run never claim the ledger and
+  // never send, so an existing row says nothing about whether they should run —
+  // blocking them would make a rehearsal depend on a real send having happened.
+  //
+  // Written as ONE condition, not two. `modeName === 'live'` already entails a
+  // constructible transport: briefMode() returns 'live' only when
+  // deliveryEnv(env).ready, which is the identical predicate
+  // createResendTransport() uses to decide whether to hand one back. Adding
+  // `&& delivery.ready` would be a condition that can never be false — a guard
+  // no mutation can turn red, which is exactly the shape briefMode() was
+  // rewritten to remove (see its note above).
+  if (modeName === 'live') {
+    const pre = await precheck({ now });
+    if (pre.blocked) {
+      logger.event('cos.brief.skipped_precheck', {
+        outcome: pre.reason,
+        message:
+          `today's brief is already ${pre.reason === 'already_sent' ? 'sent' : 'claimed'} in the send ledger` +
+          (pre.sentAt ? ` (at ${pre.sentAt})` : '') +
+          ' — stopping before the model call. Nothing gathered, nothing composed, nothing billed.',
+      });
+      return { ran: true, reason: pre.reason, sent: false, written: false, precheck: true };
+    }
+    if (pre.unavailable) {
+      // Fails OPEN here and only here. claimSend() reads the same table further
+      // down and fails CLOSED on the same fault, so the guarantee is unchanged
+      // — this run simply pays full price to be refused there instead.
+      logger.event('cos.precheck.unavailable', {
+        level: 'warn',
+        outcome: 'unavailable',
+        error_code: pre.errorCode || 'unknown',
+        message:
+          `send-ledger pre-check could not read the ledger (${pre.errorCode || 'unknown'}): ` +
+          `${pre.errorMessage || 'no detail'}. Continuing — the atomic claim below still fails closed.`,
+      });
+    }
+  }
 
   // ── gather, failing closed on any unreadable table ────────────────────────
   const gathered = await gather({ now, env });
@@ -224,6 +275,18 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
   // Spend accounting. Without this the job's tokens are invisible to
   // DAILY_TOKEN_BUDGET and the guard undercounts (see the announcement below).
   await logRun({ env, model: result.model || model, usage: result.usage, latencyMs });
+
+  // What the compose actually cost, on every run and in every mode. Until this
+  // line the only record of a model call was the spend row — which is written
+  // ONLY when COS_BRIEF_USAGE_USER_ID is set, so on an unset deploy the job's
+  // latency and token count existed nowhere at all. `result.model` first,
+  // because the record must name the model that ran, not the one requested.
+  logger.event('cos.compose.ok', {
+    outcome: 'composed',
+    latency_ms: latencyMs,
+    tokens: totalTokens(result.usage),
+    model: result.model || model,
+  });
 
   // `now` is threaded so the brief's own generated_at is the job's real clock,
   // never whatever the model decided to write there.
@@ -312,12 +375,17 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
 
     const rendered = renderBriefEmail(brief, now);
     try {
+      // Stopped the instant the transport returns, BEFORE mark(). Folding the
+      // ledger update into this number would report a slow database as a slow
+      // email provider, and the two have different owners and different fixes.
+      const sendStarted = Date.now();
       const out = await transport.send({ subject: rendered.subject, html: rendered.html, text: rendered.text });
+      const sendLatencyMs = Date.now() - sendStarted;
       sent = true;
       provider = out.provider;
       providerMessageId = out.providerMessageId;
       await mark({ key: claimedKey, provider, providerMessageId, now });
-      logger.event('cos.send.ok', { outcome: 'sent', message: `daily brief sent via ${provider}` });
+      logger.event('cos.send.ok', { outcome: 'sent', latency_ms: sendLatencyMs, message: `daily brief sent via ${provider}` });
     } catch (err) {
       // The transport throws BEFORE any network call when it is misconfigured
       // or gated off. In that case nothing was transmitted, so the claim is

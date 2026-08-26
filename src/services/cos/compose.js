@@ -1,11 +1,22 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// CoS daily-brief composer — pure, dependency-free, side-effect-free.
+// CoS daily-brief composer — pure, side-effect-free.
 //
-// Deliberately imports NOTHING. No network, no database, no logger, no config.
-// That is the same choice CoS made for its own _shared/brief.ts, and for the
-// same reason: the job runtime and the test suite must be able to exercise
-// byte-identical logic. Every rule that decides what a brief may say lives
-// here, where a test can drive it directly.
+// It imports exactly ONE thing: UNREVIEWED_ACTION_STATUS from reader.js, a bare
+// string constant. Nothing else — no network, no database, no logger, no
+// config. That is the same choice CoS made for its own _shared/brief.ts, and
+// for the same reason: the job runtime and the test suite must be able to
+// exercise byte-identical logic. Every rule that decides what a brief may say
+// lives here, where a test can drive it directly.
+//
+// This header said "Deliberately imports NOTHING" until 2026-08-26, and the one
+// import was taken knowingly. compose.js and reader.js were each filtering on
+// their own 'unreviewed' string literal, from opposite ends of the same
+// pipeline: change either and the brief's headline count would silently stop
+// agreeing with the selection that produced it, with nothing thrown and nothing
+// logged (Lesson 20 — two things agreeing because one author wrote both).
+// reader.js is already in this module's process, since cosDailyBrief.js and
+// writer.js each import both, and client.js does no work at import time — so
+// the module graph grows and nothing is executed, read, or connected.
 //
 // ── THE CONTRACT ────────────────────────────────────────────────────────────
 // The output is CoS's own `today_brief_v1`. Field names, the three-priority
@@ -40,6 +51,8 @@
 // SHA-256 of the minimized payload — a hash, never content. Excerpts are
 // bounded to 240 characters at the single boundary below.
 // ─────────────────────────────────────────────────────────────────────────────
+
+import { UNREVIEWED_ACTION_STATUS } from './reader.js';
 
 /** CoS's schema version. Changing this string breaks the CoS renderer. */
 export const BRIEF_SCHEMA_VERSION = 'today_brief_v1';
@@ -275,9 +288,14 @@ export function minimizeInput(raw, now = Date.now(), includeExcerpts = true) {
     // Carried so the brief can state its own blind spot. Defaults to "saw
     // everything" when a caller does not supply it, so an omission reads as no
     // truncation rather than as an unknown.
+    // NULL for the two pool figures, never a count taken from these rows. A
+    // caller that supplied no selection knows nothing about an eligible pool,
+    // and filling them in from the payload would manufacture exactly the
+    // slice-reported-as-inbox number this pair exists to replace.
     email_selection: raw.email_selection || {
       considered: email_messages.length, total: email_messages.length,
       truncated: false, total_is_floor: false,
+      unreviewed_total: null, oldest_unreviewed_received_at: null,
     },
   };
 }
@@ -600,10 +618,20 @@ export function validateBrief(raw, input, now = new Date()) {
  * the date had passed, and it read three unreviewed messages and mentioned
  * none of them. Counting is deterministic work; hand over the answer.
  *
- * DERIVED FROM THE MINIMIZED INPUT, never from raw rows. That is what makes
- * "every number reflects records actually supplied" structural rather than a
- * promise: this function cannot see a record the model was not also given, so
- * a count can never describe evidence the brief did not have.
+ * DERIVED FROM THE MINIMIZED INPUT, never from raw rows — with ONE stated
+ * exception, taken 2026-08-26.
+ *
+ * Every count here except the email one keeps the structural property that made
+ * this paragraph worth writing: it cannot see a record the model was not also
+ * given, so it can never describe evidence the brief did not have.
+ *
+ * THE EMAIL COUNT NOW DESCRIBES THE ELIGIBLE POOL, deliberately. The old
+ * behaviour was the worse of the two falsehoods available: with 25 unreviewed
+ * messages and a 20-row cap it announced "20 unreviewed", and read the oldest
+ * age off the newest 20 — so the number stopped growing exactly when the
+ * backlog did, and the age shrank as the backlog aged. A count that describes
+ * more than the model was given is honest only if it SAYS SO, which is why that
+ * one line carries "(of M eligible; K read)" and no other line here does.
  *
  * A fact with a zero count is OMITTED. "0 workstreams have no next action" is
  * noise, and a block of zeroes trains the reader to skip the section.
@@ -617,13 +645,43 @@ export function computeWorkspaceState(input, now = Date.now()) {
   };
 
   const email = input.email_messages || [];
-  const unreviewed = email.filter((m) => m.action_status === 'unreviewed');
-  if (unreviewed.length > 0) {
-    const ages = unreviewed.map((m) => days(m.received_at)).filter((d) => d !== null);
-    const oldest = ages.length ? Math.max(...ages) : null;
-    out.push(
-      `${plural(unreviewed.length, 'email message is', 'email messages are')} unreviewed` +
-      (oldest !== null ? `, the oldest ${plural(oldest, 'day', 'days')} old.` : '.'));
+  // K — how many email records the model was actually handed. Taken from the
+  // payload, so it FOLLOWS trimming: enforceTotalSize can drop rows after the
+  // reader counted them, and a "read" figure that ignored that would be the
+  // same lie again in a smaller place.
+  const considered = email.length;
+  const sel = input.email_selection || {};
+  // A truncated candidate pool makes BOTH pool figures floors, not counts —
+  // the same qualifier withEmailTruncationNote already puts on the eligible
+  // total, for the same reason: they are drawn from the same capped read.
+  const floor = sel.total_is_floor ? 'at least ' : '';
+
+  if (typeof sel.unreviewed_total === 'number') {
+    if (sel.unreviewed_total > 0) {
+      // `oldest_unreviewed_received_at` is null when there is nothing to date.
+      // Guarded explicitly: new Date(null) is the epoch, not an invalid date,
+      // so days(null) would return a confident ~20000 rather than nothing.
+      const oldest = sel.oldest_unreviewed_received_at
+        ? days(sel.oldest_unreviewed_received_at)
+        : null;
+      out.push(
+        `${floor}${plural(sel.unreviewed_total, 'email message is', 'email messages are')} unreviewed ` +
+        `(of ${floor}${sel.total} eligible; ${considered} read)` +
+        (oldest !== null ? `, the oldest ${plural(oldest, 'day', 'days')} old.` : '.'));
+    }
+  } else {
+    // No pool figure: a caller that supplied no selection, or a read that
+    // failed and knows nothing. Count the rows actually present and SAY that is
+    // their whole scope, rather than passing a slice count off as an inbox one.
+    const unreviewed = email.filter((m) => m.action_status === UNREVIEWED_ACTION_STATUS);
+    if (unreviewed.length > 0) {
+      const ages = unreviewed.map((m) => days(m.received_at)).filter((d) => d !== null);
+      const oldest = ages.length ? Math.max(...ages) : null;
+      out.push(
+        `${plural(unreviewed.length, 'email message is', 'email messages are')} unreviewed ` +
+        `(of the ${considered} read)` +
+        (oldest !== null ? `, the oldest ${plural(oldest, 'day', 'days')} old.` : '.'));
+    }
   }
 
   const ws = input.workstreams || [];

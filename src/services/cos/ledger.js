@@ -55,6 +55,82 @@ export function ledgerKey(now = new Date()) {
 }
 
 /**
+ * READ-ONLY: has today's brief already been sent, or already been claimed?
+ *
+ * ── WHAT THIS IS FOR, AND WHAT IT IS NOT ────────────────────────────────────
+ * It is a cost gate, not a lock. claimSend() below is still the only thing that
+ * decides a race, and this CANNOT replace it: between this SELECT and that
+ * INSERT another tick can claim the day, so a `blocked: false` here is a
+ * statement about the past, not a reservation of the future. The claim stays
+ * exactly where it is, and the 23505 path stays the mechanism.
+ *
+ * What it buys is the price of a run that was always going to be refused. The
+ * old order gathered eight CoS tables and paid for a model call BEFORE the
+ * ledger got a chance to say "already sent today" — so every retry, redeploy or
+ * duplicate tick after a completed send cost a full billable compose to reach a
+ * no. This asks the cheap question first.
+ *
+ * ── NO INSERT, NO UPDATE, AND THAT IS LOAD-BEARING ──────────────────────────
+ * A single SELECT. If this ever wrote, it would consume the day's slot on a run
+ * that has composed nothing and sent nothing — the exact stuck-'claimed' state
+ * the module's header explains is unrecoverable without a human deleting a row.
+ *
+ * ── UNREADABLE FAILS **OPEN**, THE OPPOSITE OF claimSend ────────────────────
+ * Deliberate, and safe only because of what comes after. A broken ledger here
+ * returns { blocked: false, unavailable: true } and the run continues into
+ * claimSend(), which reads the same table and fails CLOSED on the same error.
+ * So the fail-closed guarantee is unchanged; failing closed HERE as well would
+ * add nothing and would let one flaky read suppress a brief that the real guard
+ * would have allowed.
+ *
+ * Returns one of:
+ *   { blocked: false }
+ *   { blocked: true,  reason: 'already_sent',    sentAt }
+ *   { blocked: true,  reason: 'already_claimed', sentAt: null }
+ *   { blocked: false, unavailable: true, errorCode, errorMessage }
+ *
+ * The error detail rides along on the unavailable shape rather than being
+ * swallowed: this runs before the model call, so a run that dies at the model
+ * would otherwise never reach claimSend's own diagnostic and the cause would be
+ * invisible (Lesson 1, Lesson 17).
+ */
+export async function alreadySentToday({ now = new Date(), db = supabase } = {}) {
+  const key = ledgerKey(now);
+  try {
+    const { data, error } = await db
+      .from('system_flags').select('value').eq('key', key).maybeSingle();
+    if (error) {
+      return {
+        blocked: false,
+        unavailable: true,
+        errorCode: error.code || 'unknown',
+        errorMessage: error.message || String(error),
+      };
+    }
+    const value = data ? data.value : null;
+    if (value && value.status === 'sent') {
+      return { blocked: true, reason: 'already_sent', sentAt: value.sent_at || null };
+    }
+    // A row still 'claimed' means an earlier run took the day and did not
+    // finish. claimSend() refuses that case as 'in_flight' and says so at error
+    // level; naming it differently here keeps "the precheck saw it" and "the
+    // claim saw it" distinguishable in the logs rather than blurring two
+    // different moments into one word.
+    if (value && value.status === 'claimed') {
+      return { blocked: true, reason: 'already_claimed', sentAt: null };
+    }
+    return { blocked: false };
+  } catch (err) {
+    return {
+      blocked: false,
+      unavailable: true,
+      errorCode: (err && err.code) || 'unknown',
+      errorMessage: (err && err.message) || String(err),
+    };
+  }
+}
+
+/**
  * Attempt to claim today's send.
  *
  * Returns one of:
