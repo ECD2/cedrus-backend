@@ -289,6 +289,10 @@ mutate "a floored count is presented as exact ('at least' dropped)" \
   src/services/cos/compose.js \
   "  const floor = sel.total_is_floor ? 'at least ' : '';" \
   "  const floor = '';"
+mutate "the age qualifier loses its floor while the counts keep theirs" \
+  src/services/cos/compose.js \
+  ', the oldest ${floor}${plural(oldest,' \
+  ', the oldest ${plural(oldest,'
 mutate2 "reader and composer spell 'unreviewed' differently (two-spellings rule)" \
   src/services/cos/reader.js \
   "export const UNREVIEWED_ACTION_STATUS = 'unreviewed';" \

@@ -617,6 +617,13 @@ section('honest email counts — the pool, not the slice');
     /at least 200 email messages are unreviewed/.test(lineFloor), lineFloor);
   ok('...and the eligible total is floored too, from the same capped read',
     /\(of at least 200 eligible; 20 read\)/.test(lineFloor), lineFloor);
+  // The AGE is a lower bound for the same reason, and this is the subtle one.
+  // The pool is read newest-first and capped, so the rows that did not fit are
+  // the OLDER ones — the pool's oldest is a floor, not the real oldest. A bare
+  // age here would understate exactly the number the owner is most likely to
+  // act on, while the counts beside it hedged correctly.
+  ok('...and so is the AGE, because the pool holds the 200 NEWEST rows',
+    /the oldest at least /.test(lineFloor) && /the oldest at least 8 days old/.test(lineFloor), lineFloor);
 
   // CONTROL: the same rows with an unfilled pool say it plainly, no hedge. A
   // check that printed "at least" unconditionally would pass the assertion
@@ -628,6 +635,8 @@ section('honest email counts — the pool, not the slice');
   }, NOW_A), NOW_A).join(' | ');
   ok('CONTROL: an unfilled pool prints no "at least" anywhere',
     !/at least/.test(lineExact) && /200 email messages are unreviewed/.test(lineExact), lineExact);
+  ok('CONTROL: ...and the SAME age is stated flat when the pool did not fill',
+    /the oldest 8 days old/.test(lineExact), lineExact);
 
   // ── (3) THE TWO-SPELLINGS RULE ───────────────────────────────────────────
   //

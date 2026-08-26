@@ -667,7 +667,14 @@ export function computeWorkspaceState(input, now = Date.now()) {
       out.push(
         `${floor}${plural(sel.unreviewed_total, 'email message is', 'email messages are')} unreviewed ` +
         `(of ${floor}${sel.total} eligible; ${considered} read)` +
-        (oldest !== null ? `, the oldest ${plural(oldest, 'day', 'days')} old.` : '.'));
+        // THE AGE CARRIES THE FLOOR TOO. The candidate pool is read
+        // `.order('received_at', { ascending: false }).limit(200)` — the 200
+        // NEWEST eligible rows — so when it fills, the rows that did not fit are
+        // the OLDER ones. The pool's oldest is therefore a lower bound on the
+        // real oldest, in the same way and for the same reason the counts are.
+        // Printing it bare would have understated the one number the owner is
+        // most likely to act on, while the counts beside it hedged correctly.
+        (oldest !== null ? `, the oldest ${floor}${plural(oldest, 'day', 'days')} old.` : '.'));
     }
   } else {
     // No pool figure: a caller that supplied no selection, or a read that
