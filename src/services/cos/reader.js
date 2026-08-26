@@ -67,8 +67,21 @@ export const EMAIL_LOOKBACK_HOURS = 24;
  */
 export const SETTLED_ACTION_STATUS = Object.freeze(['dismissed', 'resolved']);
 
+/**
+ * The ONE spelling of "the owner has not looked at this yet".
+ *
+ * Exported because compose.js counts the same rows from the other end of the
+ * pipeline. Two modules each filtering on their own string literal is one typo
+ * away from a brief whose headline number disagrees with the selection that
+ * produced it — and NOTHING WOULD THROW, because both spellings are valid
+ * strings that simply match different rows. That is the Lesson 20 shape: two
+ * pieces of code agreeing because one author wrote both, until one of them
+ * changes. One constant, imported by both, makes the disagreement unwritable.
+ */
+export const UNREVIEWED_ACTION_STATUS = 'unreviewed';
+
 /** Age-independent: these are selected however old they are. */
-export const ATTENTION_ACTION_STATUS = Object.freeze(['action_needed', 'unreviewed']);
+export const ATTENTION_ACTION_STATUS = Object.freeze(['action_needed', UNREVIEWED_ACTION_STATUS]);
 export const ATTENTION_TRIAGE_PRIORITY = Object.freeze(['urgent', 'high']);
 
 /**
@@ -93,6 +106,16 @@ const PRIORITY_RANK = { urgent: 0, high: 1, normal: 2, low: 3 };
  *
  * Recency is LAST on purpose. It was previously first and only, which is how a
  * six-day-old unreviewed message lost to nothing at all.
+ *
+ * ── THE TWO FIGURES COUNTED OVER THE POOL, NOT THE SLICE ────────────────────
+ * `unreviewedTotal` and `oldestUnreviewedReceivedAt` are computed over the FULL
+ * eligible set, deliberately BEFORE `slice(0, limit)`. Counting them after the
+ * cap would make the brief describe its own 20-row window and call it the
+ * inbox: 25 unreviewed messages would be announced as 20, and — worse — the
+ * "oldest" age would be read off the newest 20, because the ranking sorts
+ * recency DESCENDING within a tier. The oldest unreviewed message is therefore
+ * the single row most likely to have been cut, which is exactly the row the
+ * owner most needs named.
  */
 export function selectEmailMessages(rows, limit = COS_LIMITS.email_messages) {
   const eligible = (rows || []).filter((r) => !SETTLED_ACTION_STATUS.includes(r.action_status));
@@ -103,7 +126,22 @@ export function selectEmailMessages(rows, limit = COS_LIMITS.email_messages) {
     if (pr !== 0) return pr;
     return new Date(b.received_at || 0) - new Date(a.received_at || 0);
   });
-  return { selected: ranked.slice(0, limit), eligibleTotal: ranked.length };
+  // From `eligible`, never from `ranked.slice(...)` below. See the note above.
+  const unreviewed = eligible.filter((r) => r.action_status === UNREVIEWED_ACTION_STATUS);
+  const dated = unreviewed
+    .map((r) => ({ iso: r.received_at, t: Date.parse(r.received_at) }))
+    .filter((x) => Number.isFinite(x.t));
+
+  return {
+    selected: ranked.slice(0, limit),
+    eligibleTotal: ranked.length,
+    unreviewedTotal: unreviewed.length,
+    // The row's own value, not a re-serialization of it, so what the brief
+    // reports is traceable back to a record rather than to arithmetic here.
+    oldestUnreviewedReceivedAt: dated.length
+      ? dated.reduce((a, b) => (b.t < a.t ? b : a)).iso
+      : null,
+  };
 }
 
 /**
@@ -193,8 +231,10 @@ export async function readAgentRuns(opts = {}) {
  * since the last brief). The attention half is age-independent, which is what
  * stops an old unreviewed message from silently vanishing.
  *
- * Returns { rows, error, disarmed, eligibleTotal, poolTruncated } so the caller
- * can say how much it did NOT look at.
+ * Returns { rows, error, disarmed, eligibleTotal, unreviewedTotal,
+ * oldestUnreviewedReceivedAt, poolTruncated } so the caller can say how much it
+ * did NOT look at — and how much of what it did not look at still needs the
+ * owner.
  */
 export async function readEmailMessages({ now = new Date(), ...opts } = {}) {
   const since = new Date(now.getTime() - EMAIL_LOOKBACK_HOURS * 3600_000).toISOString();
@@ -213,13 +253,27 @@ export async function readEmailMessages({ now = new Date(), ...opts } = {}) {
     ...opts,
     columns: READER_COLUMNS.email_messages.join(', '),
   });
-  if (res.disarmed || res.error || !res.rows) return { ...res, eligibleTotal: null, poolTruncated: false };
+  // NULL, never 0. A failed read knows nothing about the pool, and a zero here
+  // would be a confident "no unreviewed mail" composed out of an error.
+  if (res.disarmed || res.error || !res.rows) {
+    return {
+      ...res,
+      eligibleTotal: null,
+      unreviewedTotal: null,
+      oldestUnreviewedReceivedAt: null,
+      poolTruncated: false,
+    };
+  }
 
-  const { selected, eligibleTotal } = selectEmailMessages(res.rows, COS_LIMITS.email_messages);
+  const {
+    selected, eligibleTotal, unreviewedTotal, oldestUnreviewedReceivedAt,
+  } = selectEmailMessages(res.rows, COS_LIMITS.email_messages);
   return {
     ...res,
     rows: selected,
     eligibleTotal,
+    unreviewedTotal,
+    oldestUnreviewedReceivedAt,
     // The candidate pool itself filled up, so `eligibleTotal` is a floor, not a
     // count. Announced separately rather than quietly reported as exact.
     poolTruncated: res.rows.length >= EMAIL_CANDIDATE_POOL,
@@ -299,23 +353,53 @@ export async function gatherCosInput({ now = new Date(), env = process.env } = {
     return { ok: false, reason: 'read_failed', tables: failed };
   }
 
-  // How much email was NOT looked at. Selecting 20 of 63 and saying nothing is
-  // blindness at 68% presented as a complete brief — Lesson 7 in a new place, so
-  // the shortfall travels with the data instead of being dropped here.
-  const considered = emailMessages.rows.length;
-  const total = emailMessages.eligibleTotal;
-  const email_selection = {
+  return {
+    ok: true,
+    data: Object.fromEntries(Object.entries(named).map(([name, r]) => [name, r.rows])),
+    email_selection: buildEmailSelection(emailMessages),
+  };
+}
+
+/**
+ * The email read, turned into the record compose.js consumes.
+ *
+ * PURE, and exported, for one reason: it is the only place the reader's field
+ * names (`eligibleTotal`, `unreviewedTotal`, …) are translated into the
+ * composer's (`total`, `unreviewed_total`, …). Left inline in gatherCosInput it
+ * would be untestable without live CoS credentials, and the suite would have to
+ * hand-build the record instead — which is Lesson 20 exactly: a fixture written
+ * from the same reading as the code proves they agree with each other, not that
+ * either is right. One implementation, driven by both prod and the suite.
+ *
+ * How much email was NOT looked at. Selecting 20 of 63 and saying nothing is
+ * blindness at 68% presented as a complete brief — Lesson 7 in a new place, so
+ * the shortfall travels with the data instead of being dropped here.
+ */
+export function buildEmailSelection(emailRead) {
+  const considered = (emailRead.rows || []).length;
+  const total = emailRead.eligibleTotal;
+  return {
     considered,
     total: total === null ? considered : total,
     truncated: total !== null && total > considered,
     // eligibleTotal is a floor rather than a count when the candidate pool
     // itself filled; said plainly so "63" is never read as exact when it isn't.
-    total_is_floor: Boolean(emailMessages.poolTruncated),
-  };
-
-  return {
-    ok: true,
-    data: Object.fromEntries(Object.entries(named).map(([name, r]) => [name, r.rows])),
-    email_selection,
+    // It qualifies unreviewed_total for the SAME reason: that count is drawn
+    // from the same truncated pool, so it is a floor whenever this is.
+    total_is_floor: Boolean(emailRead.poolTruncated),
+    // The unreviewed headline, over the whole eligible pool rather than the 20
+    // rows that fitted. `truncated` already discloses that the brief did not
+    // read everything; this is the same disclosure one level in — how much of
+    // what it did not read is still waiting on the owner.
+    //
+    // NULL means "not known", not "none". compose.js reads null as an
+    // instruction to fall back to counting the rows it actually has AND to say
+    // that is what it did, rather than to print a zero it cannot support.
+    unreviewed_total: emailRead.unreviewedTotal ?? null,
+    // The oldest of those, by received_at, from that same pool. Deriving this
+    // from the selected slice systematically UNDER-reports it: the ranker sorts
+    // newest-first inside a tier, so the oldest unreviewed row is the likeliest
+    // one to have been cut by the cap.
+    oldest_unreviewed_received_at: emailRead.oldestUnreviewedReceivedAt ?? null,
   };
 }

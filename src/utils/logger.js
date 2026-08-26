@@ -52,6 +52,12 @@ const STRUCTURAL_FIELDS = new Set([
   'provider_message_id', 'latency_ms', 'outcome', 'retry_count',
   'error_category', 'error_code', 'status_code', 'message_type', 'run_type',
   'reason', 'segments', 'body_len', 'count', 'category', 'sensitivity',
+  // Added 2026-08-26 for cos.compose.ok. Both meet the criterion above: `model`
+  // is a short identifier from a fixed set ('gpt-4.1-mini'), `tokens` is an
+  // integer. Without them the two fields would be accepted by logger.event()
+  // and then silently discarded here — a caller that believes it is emitting a
+  // number, and a log line that never carries one (Lesson 1).
+  'tokens', 'model',
 ]);
 
 const ERROR_CATEGORIES = new Set([

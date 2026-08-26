@@ -164,6 +164,11 @@ function makeDeps({ data = rawData(), brief = null, db = fakeDb(), modelThrows =
     },
     transportFactory: (env) => createResendTransport(env, { fetchImpl: countingFetch }),
     claim: (a) => ledger.claimSend({ ...a, db }),
+    // Pointed at the same fake ledger as claim(). Left unset it falls back to
+    // the real alreadySentToday(), which reaches for the real Supabase client
+    // and burns ~7s per run timing out against http://supabase.invalid — a
+    // suite that is green but takes minutes stops being run.
+    precheck: (a) => ledger.alreadySentToday({ ...a, db }),
     mark: (a) => ledger.markSent({ ...a, db }),
     release: (a) => ledger.releaseClaim({ ...a, db }),
     write: async (a) => { written.push(a); return { id: 'cos-brief-1', skipped: false, reason: null }; },
@@ -496,11 +501,200 @@ section('state of the workspace — computed, not asked for');
 
   // THE STRUCTURAL PROPERTY: it can only see what the model saw. Computing from
   // the minimized input means a count can never describe a record that was
-  // trimmed out of the payload.
+  // trimmed out of the payload. Still true for every count here EXCEPT the
+  // pool-derived email one, which is the stated exception below.
   const trimmed = { ...input, email_messages: [] };
   const afterTrim = compose.computeWorkspaceState(trimmed, NOW);
   ok('a record trimmed from the payload is not counted',
     !/email messages are unreviewed/.test(afterTrim.join(' ')), afterTrim);
+
+  // THE EXCEPTION, PINNED. With a pool figure present the two halves of the
+  // sentence must move independently: the unreviewed count describes the
+  // ELIGIBLE POOL and cannot change when the payload is trimmed (the pool did
+  // not shrink — the payload did), while "K read" describes the payload and
+  // MUST follow the trim. A count that quietly kept saying "3 read" after
+  // enforceTotalSize dropped two rows would be the same falsehood this whole
+  // change removes, one level down.
+  const pooled = {
+    ...input,
+    email_selection: {
+      considered: 3, total: 9, truncated: true, total_is_floor: false,
+      unreviewed_total: 7, oldest_unreviewed_received_at: '2026-08-14T12:00:00Z',
+    },
+  };
+  const beforeTrim = compose.computeWorkspaceState(pooled, NOW).join(' | ');
+  const oneLeft = compose.computeWorkspaceState(
+    { ...pooled, email_messages: pooled.email_messages.slice(0, 1) }, NOW).join(' | ');
+
+  ok('pool-derived count is UNCHANGED when a considered row is trimmed',
+    /7 email messages are unreviewed/.test(beforeTrim) && /7 email messages are unreviewed/.test(oneLeft),
+    { beforeTrim, oneLeft });
+  ok('...but the "K read" figure FOLLOWS the trim',
+    /; 3 read\)/.test(beforeTrim) && /; 1 read\)/.test(oneLeft), { beforeTrim, oneLeft });
+  ok('...and the eligible total, which is also pool-derived, does not move',
+    /of 9 eligible/.test(beforeTrim) && /of 9 eligible/.test(oneLeft), { beforeTrim, oneLeft });
+  ok('...with the age taken from the pool row, not from what survived',
+    /the oldest 10 days old/.test(beforeTrim) && /the oldest 10 days old/.test(oneLeft), { beforeTrim, oneLeft });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section('honest email counts — the pool, not the slice');
+{
+  // The failure this section exists for: with 25 unreviewed messages and a
+  // 20-row cap, the brief announced "20 email messages are unreviewed" and took
+  // the oldest age from those 20. Both numbers were wrong in the SAME direction
+  // — understating the backlog — and the second was wrong structurally, because
+  // the ranker sorts newest-first inside a tier, so the oldest unreviewed
+  // message is the row likeliest to be cut. The count stopped growing exactly
+  // when the backlog did.
+  const NOW_A = Date.parse('2026-08-26T12:00:00Z');
+  const DAY = 86_400_000;
+
+  // 25 rows, equal action state, equal priority, distinct received_at — so
+  // recency is the ONLY thing separating them and the cap has to bite.
+  const TWENTY_FIVE = Array.from({ length: 25 }, (_, i) => ({
+    id: 'p' + i,
+    subject: 'unreviewed ' + i,
+    received_at: new Date(NOW_A - (i + 1) * DAY).toISOString(),
+    action_status: 'unreviewed',
+    triage_priority: 'normal',
+  }));
+
+  const picked = reader.selectEmailMessages(TWENTY_FIVE, 20);
+  ok('the cap really bit: 20 of 25 selected', picked.selected.length === 20, picked.selected.length);
+  ok('unreviewedTotal counts the POOL (25), not the slice (20)',
+    picked.unreviewedTotal === 25, picked.unreviewedTotal);
+  ok('the oldest unreviewed row is the one the selection EXCLUDED',
+    !picked.selected.some((r) => r.id === 'p24') && picked.oldestUnreviewedReceivedAt === TWENTY_FIVE[24].received_at,
+    { oldest: picked.oldestUnreviewedReceivedAt, selectedIds: picked.selected.map((r) => r.id) });
+
+  // The REAL mapping into the composer's record — reader.buildEmailSelection is
+  // the same function gatherCosInput calls, not a copy of it written here.
+  const sel = reader.buildEmailSelection({ ...picked, rows: picked.selected, poolTruncated: false });
+  ok('the selection record carries the pool count', sel.unreviewed_total === 25, sel);
+  ok('...and the read count separately', sel.considered === 20, sel);
+  ok('...and declares itself truncated', sel.truncated === true, sel);
+
+  const inputA = compose.minimizeInput({
+    workstreams: [], open_loops: [], decisions: [], captures: [], agent_runs: [],
+    email_ai_analyses: [], email_messages: picked.selected, email_selection: sel,
+  }, NOW_A);
+  const lineA = compose.computeWorkspaceState(inputA, NOW_A).join(' | ');
+
+  ok('the line reports 25 unreviewed, not 20', /25 email messages are unreviewed/.test(lineA), lineA);
+  ok('the line names both scopes: eligible and read', /\(of 25 eligible; 20 read\)/.test(lineA), lineA);
+  ok('the age comes from the EXCLUDED oldest row (25 days)', /the oldest 25 days old/.test(lineA), lineA);
+
+  // CONTROLS. These are the exact answers the old code gave, and they are the
+  // only thing that distinguishes "counted the pool" from "counted the slice":
+  // both produce a plausible sentence, and only these say which one ran.
+  ok('CONTROL: it does NOT report the slice count of 20', !/20 email messages are unreviewed/.test(lineA), lineA);
+  const oldestSelectedAge = Math.max(...picked.selected.map(
+    (r) => Math.floor((NOW_A - Date.parse(r.received_at)) / DAY)));
+  ok('CONTROL: the slice-derived age would have been 20, and is not used',
+    oldestSelectedAge === 20 && !/the oldest 20 days old/.test(lineA), { oldestSelectedAge, lineA });
+
+  // ── (2) a candidate pool that filled ⇒ every pool figure is a FLOOR ───────
+  const FULL_POOL = Array.from({ length: reader.EMAIL_CANDIDATE_POOL }, (_, i) => ({
+    id: 'f' + i,
+    received_at: new Date(NOW_A - (i + 1) * 3600_000).toISOString(),
+    action_status: 'unreviewed',
+    triage_priority: 'normal',
+  }));
+  ok('the fixture is exactly the candidate pool size', FULL_POOL.length === 200, FULL_POOL.length);
+  const pickedFull = reader.selectEmailMessages(FULL_POOL, 20);
+  // The same predicate readEmailMessages applies: the read came back full, so
+  // there may be more behind it and the count can only be a lower bound.
+  const poolTruncated = FULL_POOL.length >= reader.EMAIL_CANDIDATE_POOL;
+  const selFloor = reader.buildEmailSelection({ ...pickedFull, rows: pickedFull.selected, poolTruncated });
+  ok('total_is_floor is set when the pool filled', selFloor.total_is_floor === true, selFloor);
+
+  const lineFloor = compose.computeWorkspaceState(compose.minimizeInput({
+    workstreams: [], open_loops: [], decisions: [], captures: [], agent_runs: [],
+    email_ai_analyses: [], email_messages: pickedFull.selected, email_selection: selFloor,
+  }, NOW_A), NOW_A).join(' | ');
+  ok('a floored count is announced as "at least N", never as exact',
+    /at least 200 email messages are unreviewed/.test(lineFloor), lineFloor);
+  ok('...and the eligible total is floored too, from the same capped read',
+    /\(of at least 200 eligible; 20 read\)/.test(lineFloor), lineFloor);
+  // The AGE is a lower bound for the same reason, and this is the subtle one.
+  // The pool is read newest-first and capped, so the rows that did not fit are
+  // the OLDER ones — the pool's oldest is a floor, not the real oldest. A bare
+  // age here would understate exactly the number the owner is most likely to
+  // act on, while the counts beside it hedged correctly.
+  ok('...and so is the AGE, because the pool holds the 200 NEWEST rows',
+    /the oldest at least /.test(lineFloor) && /the oldest at least 8 days old/.test(lineFloor), lineFloor);
+
+  // CONTROL: the same rows with an unfilled pool say it plainly, no hedge. A
+  // check that printed "at least" unconditionally would pass the assertion
+  // above and prove nothing (Lesson 3).
+  const selExact = reader.buildEmailSelection({ ...pickedFull, rows: pickedFull.selected, poolTruncated: false });
+  const lineExact = compose.computeWorkspaceState(compose.minimizeInput({
+    workstreams: [], open_loops: [], decisions: [], captures: [], agent_runs: [],
+    email_ai_analyses: [], email_messages: pickedFull.selected, email_selection: selExact,
+  }, NOW_A), NOW_A).join(' | ');
+  ok('CONTROL: an unfilled pool prints no "at least" anywhere',
+    !/at least/.test(lineExact) && /200 email messages are unreviewed/.test(lineExact), lineExact);
+  ok('CONTROL: ...and the SAME age is stated flat when the pool did not fill',
+    /the oldest 8 days old/.test(lineExact), lineExact);
+
+  // ── (3) THE TWO-SPELLINGS RULE ───────────────────────────────────────────
+  //
+  // reader.js selects on UNREVIEWED_ACTION_STATUS and compose.js counts on it.
+  // Until 2026-08-26 each held its own 'unreviewed' string literal, from
+  // opposite ends of one pipeline. Nothing would have thrown if they drifted:
+  // both spellings are valid strings, they simply match different rows, and the
+  // brief would have reported a number the selection never produced (Lesson
+  // 20). This drives the SAME row through both and requires both to see it, so
+  // a divergence cannot stay green.
+  ok('the constant is exported from the reader', typeof reader.UNREVIEWED_ACTION_STATUS === 'string',
+    reader.UNREVIEWED_ACTION_STATUS);
+
+  const SPELLED = [{
+    id: 'sp1', subject: 'spelled with the shared constant',
+    received_at: new Date(NOW_A - 3 * DAY).toISOString(),
+    action_status: reader.UNREVIEWED_ACTION_STATUS,
+    triage_priority: 'normal',
+  }];
+
+  const spelledPick = reader.selectEmailMessages(SPELLED, 20);
+  ok('END 1 — selectEmailMessages counts a row spelled with the constant',
+    spelledPick.unreviewedTotal === 1, spelledPick);
+
+  // The FALLBACK branch on purpose: no email_selection, so computeWorkspaceState
+  // must filter the rows itself and therefore must use the same spelling.
+  const spelledInput = compose.minimizeInput({
+    workstreams: [], open_loops: [], decisions: [], captures: [], agent_runs: [],
+    email_ai_analyses: [], email_messages: SPELLED,
+  }, NOW_A);
+  ok('the default selection supplies NO pool figure, so the fallback runs',
+    spelledInput.email_selection.unreviewed_total === null &&
+    spelledInput.email_selection.oldest_unreviewed_received_at === null,
+    spelledInput.email_selection);
+  const spelledLine = compose.computeWorkspaceState(spelledInput, NOW_A).join(' | ');
+  ok('END 2 — computeWorkspaceState counts the SAME spelling',
+    /1 email message is unreviewed/.test(spelledLine), spelledLine);
+  ok('...and the fallback names its own narrower scope',
+    /\(of the 1 read\)/.test(spelledLine), spelledLine);
+  ok('...and still dates it', /the oldest 3 days old/.test(spelledLine), spelledLine);
+
+  // A row the constant does NOT describe must be counted by neither end.
+  const OTHER = [{ ...SPELLED[0], id: 'sp2', action_status: 'waiting' }];
+  ok('CONTROL: a non-unreviewed row is counted by neither end',
+    reader.selectEmailMessages(OTHER, 20).unreviewedTotal === 0 &&
+    !/email message is unreviewed/.test(compose.computeWorkspaceState(compose.minimizeInput({
+      workstreams: [], open_loops: [], decisions: [], captures: [], agent_runs: [],
+      email_ai_analyses: [], email_messages: OTHER,
+    }, NOW_A), NOW_A).join(' | ')));
+
+  // A null pool figure must never be read as zero: an unknown count falls back
+  // and says so, rather than composing "no unreviewed mail" out of a failed read.
+  const unknown = reader.buildEmailSelection({
+    rows: SPELLED, eligibleTotal: null, unreviewedTotal: null,
+    oldestUnreviewedReceivedAt: null, poolTruncated: false,
+  });
+  ok('an unknown pool count stays null, never 0',
+    unknown.unreviewed_total === null && unknown.oldest_unreviewed_received_at === null, unknown);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -780,7 +974,18 @@ section('the ledger blocks a double send');
   ok('the send really hit the Resend endpoint', sends[0].url === 'https://api.resend.com/emails', sends[0].url);
   ok('ledger row marked sent', db.rows.get(ledger.ledgerKey(now)).status === 'sent', db.rows.get(ledger.ledgerKey(now)));
 
+  // THE PRECHECK IS FORCED OPEN FOR THIS RUN, DELIBERATELY.
+  //
+  // The cheap SELECT added in 2026-08-26 would stop this second run before it
+  // gathered anything, and the assertions below would then pass while proving
+  // NOTHING about the mechanism they exist for. The precheck is a cost gate,
+  // not a lock: two concurrent ticks can both read "nothing sent" and both
+  // proceed, and only the PRIMARY KEY separates them. Driving it open puts this
+  // run back inside exactly that window, so what refuses the second send here
+  // is still the ledger's 23505 collision — which is the thing that actually
+  // makes two scheduler ticks safe.
   const second = makeDeps({ brief, db });
+  second.deps.precheck = async () => ({ blocked: false });
   const r2 = await runCosDailyBrief({ env: ARMED_ENV, now, deps: second.deps });
   ok('SECOND run the same day sends NOTHING MORE', sends.length === 1, sends.length);
   ok('second run reports already_sent', r2.reason === 'already_sent', r2.reason);
@@ -798,6 +1003,7 @@ section('the ledger blocks a double send');
   // A different UTC day is a different key, so tomorrow is not blocked.
   const tomorrow = new Date('2026-08-18T11:00:00Z');
   const third = makeDeps({ brief, db });
+  third.deps.precheck = async () => ({ blocked: false });
   await runCosDailyBrief({ env: ARMED_ENV, now: tomorrow, deps: third.deps });
   ok('the NEXT UTC day sends again (the block is per-day, not forever)', sends.length === 2, sends.length);
 
@@ -851,6 +1057,196 @@ section('the ledger blocks a double send');
   const brokenDb = { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: { code: '42P01', message: 'no such table' } }) }) }) }) };
   const broken = await ledger.claimSend({ now, db: brokenDb });
   ok('an unreadable ledger fails CLOSED (no send)', broken.claimed === false && broken.reason === 'ledger_unreadable', broken);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section('pre-check — a day already sent costs nothing to refuse');
+{
+  // Before this, a second tick after a completed send read eight CoS tables and
+  // paid for a full billable model call before the ledger told it no. The
+  // precheck is a READ placed ahead of that work. It is NOT a lock and does not
+  // replace the atomic claim — see the double-send section, which drives it
+  // open on purpose to keep testing the 23505 race it cannot cover.
+  const brief = briefCiting([{ type: 'open_loop', id: IDS.loop }]);
+  const NOW_P = new Date('2026-08-26T11:00:00Z');
+  const KEY = ledger.ledgerKey(NOW_P);
+
+  // Counts the two expensive steps the precheck exists to skip.
+  function countingDeps(opts) {
+    const made = makeDeps(opts);
+    const counts = { gathers: 0, models: 0 };
+    const g = made.deps.gather;
+    const m = made.deps.callModel;
+    made.deps.gather = async (a) => { counts.gathers++; return g(a); };
+    made.deps.callModel = async (a) => { counts.models++; return m(a); };
+    return { ...made, counts };
+  }
+
+  // ── (5) a sent row for today stops the run before anything is spent ───────
+  reset();
+  const dbSent = fakeDb();
+  dbSent.rows.set(KEY, { status: 'sent', sent_at: '2026-08-26T11:00:02Z' });
+  const sentRun = countingDeps({ brief, db: dbSent });
+  let r5;
+  const evts5 = await captureLogs(async () => {
+    r5 = await runCosDailyBrief({ env: ARMED_ENV, now: NOW_P, deps: sentRun.deps });
+  });
+
+  ok('sent row: gather is never called', sentRun.counts.gathers === 0, sentRun.counts);
+  ok('sent row: the model is never called — nothing billed', sentRun.counts.models === 0, sentRun.counts);
+  ok('sent row: ZERO sends on the wire', sends.length === 0, sends.length);
+  ok('sent row: nothing written back', sentRun.written.length === 0, sentRun.written.length);
+  ok('sent row: reported as already_sent, flagged as a precheck stop',
+    r5.ran === true && r5.reason === 'already_sent' && r5.sent === false &&
+    r5.written === false && r5.precheck === true, r5);
+  ok('sent row: the stop is ANNOUNCED, not silent',
+    Boolean(eventNamed(evts5, 'cos.brief.skipped_precheck')) &&
+    eventNamed(evts5, 'cos.brief.skipped_precheck').outcome === 'already_sent',
+    eventNamed(evts5, 'cos.brief.skipped_precheck'));
+
+  // THE READ-ONLY PROPERTY. A precheck that wrote would consume the day's slot
+  // on a run that composed nothing — the stuck-'claimed' state the ledger
+  // header says needs a human to clear.
+  ok('the precheck INSERTED nothing and UPDATED nothing',
+    dbSent.rows.size === 1 && dbSent.rows.get(KEY).status === 'sent' &&
+    dbSent.rows.get(KEY).sent_at === '2026-08-26T11:00:02Z', [...dbSent.rows.entries()]);
+
+  // A row still 'claimed' blocks too, under its own distinguishable reason.
+  reset();
+  const dbClaimed = fakeDb();
+  dbClaimed.rows.set(KEY, { status: 'claimed', claimed_at: NOW_P.toISOString() });
+  const claimedRun = countingDeps({ brief, db: dbClaimed });
+  const rClaimed = await runCosDailyBrief({ env: ARMED_ENV, now: NOW_P, deps: claimedRun.deps });
+  ok('an unfinished claim also stops the run, as already_claimed',
+    rClaimed.reason === 'already_claimed' && rClaimed.precheck === true &&
+    claimedRun.counts.models === 0 && sends.length === 0, { rClaimed, counts: claimedRun.counts });
+
+  // CONTROL: with an EMPTY ledger the identical setup runs all the way through
+  // and sends. Without this, every assertion above would also pass for a
+  // precheck that blocked unconditionally (Lesson 3).
+  reset();
+  const dbEmpty = fakeDb();
+  const openRun = countingDeps({ brief, db: dbEmpty });
+  const rOpen = await runCosDailyBrief({ env: ARMED_ENV, now: NOW_P, deps: openRun.deps });
+  ok('CONTROL: an empty ledger gathers, calls the model ONCE, and sends',
+    openRun.counts.gathers === 1 && openRun.counts.models === 1 &&
+    sends.length === 1 && rOpen.sent === true,
+    { counts: openRun.counts, sends: sends.length, rOpen });
+
+  // ── (6) the precheck's read throws ⇒ continue exactly as before ───────────
+  //
+  // Fails OPEN here and only here. claimSend() reads the same table further
+  // down and fails CLOSED on the same fault, so the no-duplicate guarantee is
+  // untouched — this run just pays full price to be refused there instead.
+  const throwingRead = {
+    from: () => ({ select: () => ({ eq: () => ({
+      maybeSingle: async () => { throw new Error('ledger read exploded'); },
+    }) }) }),
+  };
+  reset();
+  const dbGood = fakeDb();
+  const thrown = countingDeps({ brief, db: dbGood });
+  thrown.deps.precheck = (a) => ledger.alreadySentToday({ ...a, db: throwingRead });
+  let r6;
+  const evts6 = await captureLogs(async () => {
+    r6 = await runCosDailyBrief({ env: ARMED_ENV, now: NOW_P, deps: thrown.deps });
+  });
+  ok('a throwing precheck does NOT abort the run', r6.ran === true && r6.reason === 'ok', r6);
+  ok('...the model is still called exactly ONCE', thrown.counts.models === 1, thrown.counts);
+  ok('...the claim path runs as before and the send happens',
+    sends.length === 1 && r6.sent === true, { sends: sends.length, r6 });
+  ok('...and the day is claimed and marked by the normal path',
+    dbGood.rows.get(KEY) && dbGood.rows.get(KEY).status === 'sent', [...dbGood.rows.entries()]);
+  const unavail = eventNamed(evts6, 'cos.precheck.unavailable');
+  ok('...the failure is ANNOUNCED at warn, never swallowed',
+    Boolean(unavail) && unavail.level === 'warn', unavail);
+  ok('...and the announcement carries the real error text (Lesson 17)',
+    Boolean(unavail) && /ledger read exploded/.test(String(unavail.message)), unavail && unavail.message);
+
+  // The unit-level contract, driven directly: any error ⇒ unavailable, never
+  // blocked, and never a write.
+  const errRead = {
+    from: () => ({ select: () => ({ eq: () => ({
+      maybeSingle: async () => ({ data: null, error: { code: '42P01', message: 'no such table' } }),
+    }) }) }),
+  };
+  const unavailable = await ledger.alreadySentToday({ now: NOW_P, db: errRead });
+  ok('alreadySentToday: an error is unavailable, NOT blocked',
+    unavailable.blocked === false && unavailable.unavailable === true &&
+    unavailable.errorCode === '42P01', unavailable);
+  const clean = await ledger.alreadySentToday({ now: NOW_P, db: fakeDb() });
+  ok('CONTROL: a clean empty ledger is simply not blocked',
+    clean.blocked === false && clean.unavailable === undefined, clean);
+
+  // ── (7) yesterday's key does not block today ──────────────────────────────
+  reset();
+  const dbYesterday = fakeDb();
+  const YESTERDAY = new Date('2026-08-25T11:00:00Z');
+  const YKEY = ledger.ledgerKey(YESTERDAY);
+  ok('the two days really are different keys', YKEY !== KEY, { YKEY, KEY });
+  dbYesterday.rows.set(YKEY, { status: 'sent', sent_at: YESTERDAY.toISOString() });
+  const dayRun = countingDeps({ brief, db: dbYesterday });
+  const r7 = await runCosDailyBrief({ env: ARMED_ENV, now: NOW_P, deps: dayRun.deps });
+  ok("yesterday's sent row does not block today", r7.sent === true && sends.length === 1, { r7, sends: sends.length });
+  ok('...the model was called for today', dayRun.counts.models === 1, dayRun.counts);
+  ok("...and yesterday's row is untouched",
+    dbYesterday.rows.get(YKEY).sent_at === YESTERDAY.toISOString(), dbYesterday.rows.get(YKEY));
+  const yCheck = await ledger.alreadySentToday({ now: NOW_P, db: dbYesterday });
+  ok('the precheck reads TODAY\'s key only', yCheck.blocked === true && yCheck.reason === 'already_sent', yCheck);
+
+  // ── (8) the rehearsal rungs ignore the precheck entirely ─────────────────
+  //
+  // Neither claims the ledger and neither sends, so an existing row says
+  // nothing about whether they should run. Blocking them would make a rehearsal
+  // depend on a real send having happened — which is the one thing a rehearsal
+  // must not need.
+  for (const [flag, expected] of [
+    ['COS_BRIEF_WRITEBACK_ONLY', 'writeback_only'],
+    ['COS_BRIEF_DRY_RUN', 'dry_run'],
+  ]) {
+    reset();
+    const dbRehearse = fakeDb();
+    dbRehearse.rows.set(KEY, { status: 'sent', sent_at: '2026-08-26T11:00:02Z' });
+    const run = countingDeps({ brief, db: dbRehearse });
+    const rr = await runCosDailyBrief({
+      env: { ...ARMED_ENV, [flag]: 'true' }, now: NOW_P, deps: run.deps,
+    });
+    ok(`${expected}: a sent row does NOT stop it — the model is still called`,
+      run.counts.models === 1 && run.counts.gathers === 1, run.counts);
+    ok(`${expected}: it reports its own mode, not already_sent`,
+      rr.reason === expected && rr.precheck === undefined, rr);
+    ok(`${expected}: still sends nothing`, sends.length === 0, sends.length);
+    ok(`${expected}: leaves the ledger row exactly as it found it`,
+      dbRehearse.rows.size === 1 && dbRehearse.rows.get(KEY).status === 'sent',
+      [...dbRehearse.rows.entries()]);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section('timing — the model call and the send each report what they cost');
+{
+  // Until now the only record of a model call's cost was the spend row, and
+  // that is written ONLY when COS_BRIEF_USAGE_USER_ID is set — so on the
+  // current deploy, where it is unset, the job's latency and token count
+  // existed nowhere at all.
+  reset();
+  const { deps } = makeDeps({ brief: briefCiting([{ type: 'open_loop', id: IDS.loop }]), db: fakeDb() });
+  let rT;
+  const evtsT = await captureLogs(async () => {
+    rT = await runCosDailyBrief({ env: ARMED_ENV, now: new Date('2026-08-26T11:00:00Z'), deps });
+  });
+  ok('CONTROL: the run really did compose and send', rT.sent === true && sends.length === 1, rT);
+
+  const composed = eventNamed(evtsT, 'cos.compose.ok');
+  ok('cos.compose.ok carries a FINITE latency_ms',
+    Boolean(composed) && Number.isFinite(composed.latency_ms), composed);
+  ok('...and names the outcome, the tokens and the model that actually ran',
+    Boolean(composed) && composed.outcome === 'composed' &&
+    composed.tokens === 150 && composed.model === 'gpt-4.1-mini', composed);
+
+  const sentEvt = eventNamed(evtsT, 'cos.send.ok');
+  ok('cos.send.ok carries a FINITE latency_ms',
+    Boolean(sentEvt) && Number.isFinite(sentEvt.latency_ms), sentEvt);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -21,7 +21,8 @@ mksums() {
   shasum -a 256 \
     src/jobs/cosDailyBrief.js src/jobs/scheduler.js \
     src/services/cos/client.js src/services/cos/compose.js \
-    src/services/cos/ledger.js src/services/cos/renderer.js \
+    src/services/cos/ledger.js src/services/cos/reader.js \
+    src/services/cos/renderer.js \
     src/services/cos/resendTransport.js > "$out"
   echo "$out"
 }
@@ -39,6 +40,31 @@ mutate() {
   bun "$SUITE" >/dev/null 2>&1
   code=$?
   mv "$file.bak" "$file"
+  if [ "$code" -ne 0 ]; then
+    echo "  RED     $desc  (exit $code)"
+    PASSED=$((PASSED+1))
+  else
+    echo "  MISSED  $desc  -- suite stayed GREEN with the guard broken"
+    MISSED=$((MISSED+1))
+  fi
+}
+
+# Some guards are not in one file. The two-spellings rule only breaks when
+# reader.js and compose.js disagree, and mutating either alone leaves them in
+# agreement and the suite green — which would read as "no guard here" when the
+# guard is precisely the agreement. One mutation, two files, restored together.
+mutate2() {
+  desc="$1"; f1="$2"; from1="$3"; to1="$4"; f2="$5"; from2="$6"; to2="$7"
+  cp "$f1" "$f1.bak"; cp "$f2" "$f2.bak"
+  FROM="$from1" TO="$to1" perl -0777 -pi -e 'my $f=$ENV{FROM}; my $t=$ENV{TO}; $_ =~ s/\Q$f\E/$t/;' "$f1"
+  FROM="$from2" TO="$to2" perl -0777 -pi -e 'my $f=$ENV{FROM}; my $t=$ENV{TO}; $_ =~ s/\Q$f\E/$t/;' "$f2"
+  if cmp -s "$f1" "$f1.bak" || cmp -s "$f2" "$f2.bak"; then
+    echo "  ERROR   $desc -- one or both edits did not apply (pattern not found)"
+    MISSED=$((MISSED+1)); mv "$f1.bak" "$f1"; mv "$f2.bak" "$f2"; return
+  fi
+  bun "$SUITE" >/dev/null 2>&1
+  code=$?
+  mv "$f1.bak" "$f1"; mv "$f2.bak" "$f2"
   if [ "$code" -ne 0 ]; then
     echo "  RED     $desc  (exit $code)"
     PASSED=$((PASSED+1))
@@ -246,6 +272,55 @@ mutate "the confidence caveat is dropped from the email" \
   src/services/cos/renderer.js \
   'Confidence ${esc(Math.round((p.confidence || 0) * 100))}% — how well your records support this, not how sure the model sounds.' \
   'Confidence ${esc(Math.round((p.confidence || 0) * 100))}%.'
+
+echo ""
+echo "-- guard 12: honest email counts (the pool, not the slice) --"
+mutate "the unreviewed count is taken from the SELECTED slice, not the pool" \
+  src/services/cos/reader.js \
+  '  const unreviewed = eligible.filter((r) => r.action_status === UNREVIEWED_ACTION_STATUS);' \
+  '  const unreviewed = ranked.slice(0, limit).filter((r) => r.action_status === UNREVIEWED_ACTION_STATUS);'
+mutate "the oldest unreviewed age is read off the considered slice" \
+  src/services/cos/reader.js \
+  '  const dated = unreviewed
+    .map((r) => ({ iso: r.received_at, t: Date.parse(r.received_at) }))' \
+  '  const dated = ranked.slice(0, limit)
+    .map((r) => ({ iso: r.received_at, t: Date.parse(r.received_at) }))'
+mutate "a floored count is presented as exact ('at least' dropped)" \
+  src/services/cos/compose.js \
+  "  const floor = sel.total_is_floor ? 'at least ' : '';" \
+  "  const floor = '';"
+mutate "the age qualifier loses its floor while the counts keep theirs" \
+  src/services/cos/compose.js \
+  ', the oldest ${floor}${plural(oldest,' \
+  ', the oldest ${plural(oldest,'
+mutate2 "reader and composer spell 'unreviewed' differently (two-spellings rule)" \
+  src/services/cos/reader.js \
+  "export const UNREVIEWED_ACTION_STATUS = 'unreviewed';" \
+  "export const UNREVIEWED_ACTION_STATUS = 'unreviewed_v2';" \
+  src/services/cos/compose.js \
+  '    const unreviewed = email.filter((m) => m.action_status === UNREVIEWED_ACTION_STATUS);' \
+  "    const unreviewed = email.filter((m) => m.action_status === 'unreviewed');"
+
+echo ""
+echo "-- guard 13: the send-ledger pre-check --"
+mutate "the pre-check never blocks (always reports not-sent)" \
+  src/services/cos/ledger.js \
+  'export async function alreadySentToday({ now = new Date(), db = supabase } = {}) {
+  const key = ledgerKey(now);' \
+  'export async function alreadySentToday({ now = new Date(), db = supabase } = {}) {
+  return { blocked: false };
+  const key = ledgerKey(now);'
+mutate "an unreadable ledger ABORTS the run instead of continuing" \
+  src/jobs/cosDailyBrief.js \
+  '    if (pre.unavailable) {' \
+  '    if (pre.unavailable) {
+      return { ran: true, reason: '"'"'precheck_unavailable'"'"', sent: false, written: false };
+    }
+    if (pre.unavailable) {'
+mutate "the pre-check is applied to writeback-only, which must never be blocked" \
+  src/jobs/cosDailyBrief.js \
+  "  if (modeName === 'live') {" \
+  "  if (modeName === 'live' || modeName === 'writeback_only') {"
 
 echo ""
 echo "=== RESULT: $PASSED guards proven live, $MISSED missed ==="
