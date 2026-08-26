@@ -62,6 +62,23 @@ const clientMod = await import('../src/services/cos/client.js');
 const readerCols = await import('../src/services/cos/reader.js');
 const { ResendTransport, createResendTransport, deliveryEnv, DEFAULT_FROM } = await import('../src/services/cos/resendTransport.js');
 const { renderBriefEmail, esc } = await import('../src/services/cos/renderer.js');
+const loggerMod = await import('../src/utils/logger.js');
+
+// ── the logger drop detector, armed for the WHOLE suite ────────────────────
+//
+// logger.event() discards any field outside STRUCTURAL_FIELDS in silence. The
+// CoS job was losing six of them (considered / eligible_total / total_is_floor
+// on cos.email.truncated; priorities / cited_records / subject_chars on
+// cos.brief.dry_run and cos.brief.writeback_only) and nothing said so, because
+// there is nothing to see: no warning, no throw, no line.
+//
+// Armed HERE rather than around one run on purpose. Every runCosDailyBrief()
+// below — armed, disarmed, dry run, writeback-only, double-send, precheck,
+// budget-gated, every failure path — emits through the real logger, so this
+// records the real event stream of the whole bundle and the assertion at the
+// bottom is over all of it. Arming it around a single fixture would prove only
+// that one path.
+loggerMod.armDropRecorder();
 
 let failures = 0;
 const p = (...a) => console.log(...a);
@@ -1627,6 +1644,167 @@ section('failure paths degrade honestly');
   // Model default names the model that actually ran, not CoS's.
   ok('briefModel defaults to this repo\'s configured model', briefModel({}) === 'gpt-4.1-mini', briefModel({}));
   ok('briefModel is overridable', briefModel({ COS_BRIEF_MODEL: 'x' }) === 'x');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section('the six recovered fields reach the log line, from the real job');
+{
+  // WHY THIS SECTION EXISTS, and it is not redundant with the aggregate below.
+  //
+  // The aggregate assertion can only see events that actually FIRED. Three of
+  // the six fields this branch recovered ride on `cos.email.truncated`, and
+  // nothing in this bundle was making the real job emit that event — the
+  // truncation section above drives the COMPOSER directly and never reaches
+  // logger.event(). So the aggregate was silently not covering half the change,
+  // and a mutation removing `considered` from the allowlist would have stayed
+  // GREEN while looking covered. That is Lesson 4 exactly: a test that passes
+  // for the wrong reason.
+  //
+  // These runs drive the REAL job and assert the fields on the REAL emitted
+  // record, so the aggregate covers the truncation path from here on too.
+
+  // ── cos.email.truncated: considered / eligible_total / total_is_floor ────
+  reset();
+  const t = makeDeps({ brief: briefCiting([{ type: 'open_loop', id: IDS.loop }]) });
+  const baseGather = t.deps.gather;
+  t.deps.gather = async () => {
+    const g = await baseGather();
+    return { ...g, email_selection: { considered: 20, total: 53, truncated: true, total_is_floor: false } };
+  };
+  const tEvents = await captureLogs(() => runCosDailyBrief({
+    env: ARMED_ENV, now: new Date('2026-08-17T11:00:00Z'), deps: t.deps,
+  }));
+  const trunc = eventNamed(tEvents, 'cos.email.truncated');
+  ok('the real job emits cos.email.truncated', trunc !== null, tEvents.map((e) => e.event));
+  ok('cos.email.truncated carries `considered`', trunc && trunc.considered === 20, trunc);
+  ok('cos.email.truncated carries `eligible_total`', trunc && trunc.eligible_total === 53, trunc);
+  ok('cos.email.truncated carries `total_is_floor`', trunc && trunc.total_is_floor === false, trunc);
+
+  // `false` is the value that would be indistinguishable from a dropped field
+  // if it were tested with a truthiness check, so assert the KEY is present
+  // too. This is the same shape as the boolean-guard warning in Lesson 11.
+  ok('`total_is_floor: false` is present as a key, not merely falsy',
+    trunc !== null && Object.prototype.hasOwnProperty.call(trunc, 'total_is_floor'), trunc);
+
+  // CONTROL: no truncation ⇒ no event at all. Without this, "the event carried
+  // the fields" could be true of an event that fires unconditionally.
+  reset();
+  const nt = makeDeps({ brief: briefCiting([{ type: 'open_loop', id: IDS.loop }]) });
+  const baseGatherNt = nt.deps.gather;
+  nt.deps.gather = async () => {
+    const g = await baseGatherNt();
+    return { ...g, email_selection: { considered: 7, total: 7, truncated: false, total_is_floor: false } };
+  };
+  const ntEvents = await captureLogs(() => runCosDailyBrief({
+    env: ARMED_ENV, now: new Date('2026-08-18T11:00:00Z'), deps: nt.deps,
+  }));
+  ok('CONTROL: nothing truncated ⇒ no cos.email.truncated event',
+    eventNamed(ntEvents, 'cos.email.truncated') === null,
+    ntEvents.map((e) => e.event));
+
+  // ── cos.brief.dry_run: priorities / cited_records / subject_chars ────────
+  reset();
+  const d = makeDeps({ brief: briefCiting([{ type: 'open_loop', id: IDS.loop }]) });
+  const dEvents = await captureLogs(() => runCosDailyBrief({
+    // COS_BRIEF_DRY_RUN, not BRIEF_DRY_RUN — this job reads its own flag and
+    // the section above pins that it ignores the global one.
+    env: { ...ARMED_ENV, COS_BRIEF_DRY_RUN: 'true' },
+    now: new Date('2026-08-17T11:00:00Z'), deps: d.deps,
+  }));
+  const dry = eventNamed(dEvents, 'cos.brief.dry_run');
+  ok('the real job emits cos.brief.dry_run', dry !== null, dEvents.map((e) => e.event));
+  ok('cos.brief.dry_run carries `priorities`', dry && typeof dry.priorities === 'number', dry);
+  ok('cos.brief.dry_run carries `cited_records`', dry && typeof dry.cited_records === 'number', dry);
+  ok('cos.brief.dry_run carries `subject_chars`', dry && typeof dry.subject_chars === 'number', dry);
+  ok('...and subject_chars is the real rendered length, not a placeholder',
+    dry && dry.subject_chars > 10, dry);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section('the logger loses nothing this job hands it');
+{
+  // Everything above this line has now run. `records` is every logger.event()
+  // emitted by the real job, the real composer, the real ledger, the real
+  // writer, the real client and the real Resend transport across every fixture
+  // in this bundle, filtered to those that lost a field to STRUCTURAL_FIELDS.
+  const records = loggerMod.dropRecords();
+  const seen = loggerMod.dropRecordsSeen();
+  loggerMod.disarmDropRecorder();
+
+  // THE CONTROL FOR THE ASSERTION BELOW, and it has to come first.
+  //
+  // "records is empty" is an assertion that nothing happened, and an empty
+  // array is also what a recorder that was never armed returns, and what a
+  // recorder armed around code that emits nothing returns. Those three are
+  // indistinguishable from the array alone. `seen` separates them: it counts
+  // every event that passed through while armed. A healthy run is "many events
+  // seen, none dropped"; the failure this guards against is "zero seen", which
+  // would make the next assertion vacuous.
+  ok('the drop recorder actually observed this suite\'s events',
+    seen > 50, seen);
+
+  ok('no CoS event dropped a field it was handed',
+    records.length === 0,
+    records);
+
+  // ── the control ──────────────────────────────────────────────────────────
+  //
+  // Without this, the assertion above passes identically whether the detector
+  // works or is stubbed to return nothing — the exact "a control that does not
+  // discriminate" trap in II.2. A deliberately unknown field must be REPORTED,
+  // or "zero drops" carries no information.
+  loggerMod.armDropRecorder();
+  loggerMod.logger.event('test.control.unknown_field', {
+    outcome: 'ok',
+    definitely_not_allow_listed_2026_08_26: 1,
+  });
+  const ctrl = loggerMod.dropRecords();
+  loggerMod.disarmDropRecorder();
+
+  ok('CONTROL — an unknown field IS reported dropped',
+    ctrl.length === 1
+    && ctrl[0].event === 'test.control.unknown_field'
+    && ctrl[0].dropped.length === 1
+    && ctrl[0].dropped[0] === 'definitely_not_allow_listed_2026_08_26',
+    ctrl);
+
+  // …and the same event's allow-listed sibling is NOT reported, so the
+  // detector is discriminating between the two rather than flagging the whole
+  // call. `outcome` was passed alongside and must not appear.
+  ok('CONTROL — an allow-listed field on the same call is NOT reported',
+    ctrl.length === 1 && !ctrl[0].dropped.includes('outcome'),
+    ctrl);
+
+  // The six fields this branch added, asserted by name rather than only via
+  // the aggregate above. If one is removed from the allowlist the aggregate
+  // catches it, but this says WHICH — and it pins the intent against a future
+  // edit that "tidies" the list.
+  const SIX = ['considered', 'eligible_total', 'total_is_floor',
+    'priorities', 'cited_records', 'subject_chars'];
+  const stillDropped = loggerMod.droppedFields(
+    Object.fromEntries(SIX.map((k) => [k, 1])));
+  ok('all six CoS fields survive the allowlist', stillDropped.length === 0, stillDropped);
+
+  // `level` is consumed by logger.event() as the record's level, not by the
+  // allowlist. If the detector counted it, every warn/error event in the repo
+  // would report a phantom loss and the aggregate assertion would be noise.
+  ok('`level` is consumed, not dropped',
+    loggerMod.droppedFields({ level: 'warn', outcome: 'x' }).length === 0);
+  ok('`message` and `meta` are consumed, not dropped',
+    loggerMod.droppedFields({ message: 'hi', meta: { a: 1 } }).length === 0);
+
+  // Production output must be identical whether or not a recorder is armed.
+  // The detector is an instrument, not a feature; if it ever leaked a key into
+  // the record it would be changing the thing it exists to measure.
+  const before = JSON.stringify(loggerMod.buildLogRecord('info', 'x.y', { outcome: 'sent', nope: 1 }));
+  loggerMod.armDropRecorder();
+  const during = JSON.stringify(loggerMod.buildLogRecord('info', 'x.y', { outcome: 'sent', nope: 1 }));
+  loggerMod.disarmDropRecorder();
+  // timestamp differs between the two calls; compare everything else.
+  const strip = (s) => s.replace(/"timestamp":"[^"]*",/, '');
+  ok('arming the recorder does not change the emitted record',
+    strip(before) === strip(during), { before, during });
+  ok('the dropped key is still absent from the record', !/"nope"/.test(during), during);
 }
 
 p('');
