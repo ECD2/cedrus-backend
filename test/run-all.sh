@@ -117,6 +117,13 @@ echo "=== Bundle 39 — logger.scrub: ISO timestamps vs phone redaction ==="
 bun test/scrub-timestamps.test.mjs
 
 echo ""
+echo "=== Bundle 40 — verify-brief-run: post-deploy log verification ==="
+# bun explicitly, not $RUNNER: top-level await + dynamic import.
+# This suite SPAWNS the real script to read its exit codes, which is the whole
+# contract for anything invoking it from a shell.
+bun test/verify-brief-run.test.mjs
+
+echo ""
 echo "=== CoS reader/schema conformance ==="
 # The ONLY stage that can catch a reader/schema mismatch. Every other suite
 # passes happily while one exists, because the reader, the composer and the
