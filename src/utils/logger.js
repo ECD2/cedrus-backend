@@ -58,7 +58,78 @@ const STRUCTURAL_FIELDS = new Set([
   // and then silently discarded here — a caller that believes it is emitting a
   // number, and a log line that never carries one (Lesson 1).
   'tokens', 'model',
+  // Added 2026-08-26 (second pass) for the six fields the CoS daily brief was
+  // already handing this logger and already losing. Each one is a number or a
+  // boolean — low-cardinality, no free-form content — which is the criterion
+  // stated at the top of this block and the ONLY reason they qualify:
+  //   considered / eligible_total / total_is_floor  → cos.email.truncated
+  //   priorities / cited_records / subject_chars    → cos.brief.dry_run,
+  //                                                   cos.brief.writeback_only
+  // The allowlist is NOT widened to anything free-form. A field carrying model
+  // text, a subject line, a body, a table name or an id list does not belong
+  // here however useful it would be; that is what `message` and the restricted
+  // lane are for. When in doubt the test is "could this field take an unbounded
+  // number of distinct values, or contain something a person wrote?" — if yes,
+  // it stays out.
+  'considered', 'eligible_total', 'total_is_floor',
+  'priorities', 'cited_records', 'subject_chars',
 ]);
+
+// Keys that buildLogRecord consumes by a route OTHER than the allowlist, so
+// they are not "dropped" when they fail to appear as structural fields:
+//   message / meta — emitted verbatim below (or deliberately suppressed by the
+//                    restricted lane), never as allow-listed keys
+//   level          — read by logger.event() and passed in as the `level`
+//                    argument, where it becomes rec.level
+// Without this set, every single `logger.event(name, { level: 'warn', … })`
+// call in the repo would report `level` as a lost field and the detector below
+// would be pure noise.
+const NON_STRUCTURAL_CONSUMED = new Set(['message', 'meta', 'level']);
+
+// ── The drop detector ──────────────────────────────────────────────────────
+//
+// `logger.event()` silently discards any field outside STRUCTURAL_FIELDS: no
+// warning, no throw, no line. That is the documented "structured-first,
+// reject-disallowed-keys" rule and it is correct — but it means a caller can
+// believe it is emitting a number while the log line never carries one, and
+// nothing anywhere says so. It cost us `tokens`/`model` on cos.compose.ok and
+// six more fields on the CoS job (2026-08-26).
+//
+// This is the instrument that makes that visible TO A TEST. It deliberately
+// does not change production output: nothing here writes to the record, and
+// the recorder below is disarmed unless a test arms it.
+//
+// Pure. Returns the names, sorted, that this object would lose to the
+// allowlist. A key is reported whatever its value: `{ foo: null }` is still a
+// field the caller handed us and still a field that will never appear. Erring
+// toward reporting is the safe direction — a false alarm makes a human look at
+// a call site, a miss is the exact silence this exists to break.
+export function droppedFields(fields = {}) {
+  if (!fields || typeof fields !== 'object') return [];
+  const out = [];
+  for (const k of Object.keys(fields)) {
+    if (NON_STRUCTURAL_CONSUMED.has(k)) continue;
+    if (STRUCTURAL_FIELDS.has(k)) continue;
+    out.push(k);
+  }
+  return out.sort();
+}
+
+// Test-only recorder. `null` (disarmed) in production, so buildLogRecord pays
+// one falsy check per event and allocates nothing. Armed by a suite that wants
+// to assert a real run lost no fields.
+let dropRecorder = null;
+
+// How many events passed through while armed, dropped or not.
+//
+// This exists because the interesting assertion — "this run lost no fields" —
+// is an assertion that NOTHING happened, and a recorder that was never armed,
+// or armed around code that emits nothing, produces exactly the same empty
+// array as a clean run. A test cannot tell those apart from `dropRecords()`
+// alone. The count is the control: it proves the instrument was pointed at
+// something (II.2, "a test asserting nothing happened must prove it could
+// have happened").
+let dropRecorderSeen = 0;
 
 const ERROR_CATEGORIES = new Set([
   'auth', 'validation', 'parse_error', 'rate_limit', 'quota',
@@ -182,6 +253,20 @@ export function buildLogRecord(level, event, fields = {}) {
   const merged = { ...ctx, ...fields };
   const restricted = merged.sensitivity === RESTRICTED;
 
+  // Drop detection. Runs ONLY when a test has armed the recorder — production
+  // takes one falsy check and allocates nothing, and `rec` is not touched
+  // either way, so the emitted line is byte-identical armed or not.
+  //
+  // `merged` is the right input, not `fields`: the ambient context is filtered
+  // by the same allowlist, so a context key outside it is lost exactly as a
+  // caller's field would be, and a detector that only looked at `fields` would
+  // report a clean run while a correlation field silently vanished.
+  if (dropRecorder) {
+    dropRecorderSeen++;
+    const lost = droppedFields(merged);
+    if (lost.length) dropRecorder.push({ event, dropped: lost });
+  }
+
   // Copy allow-listed structural fields (context + explicit fields).
   for (const k of Object.keys(merged)) {
     if (k === 'message' || k === 'meta') continue;
@@ -287,7 +372,26 @@ export const logger = {
   // Test/introspection hooks.
   _build: buildLogRecord,
   _scrub: scrub,
+  _droppedFields: droppedFields,
+  _armDropRecorder: armDropRecorder,
+  _dropRecords: dropRecords,
+  _dropRecordsSeen: dropRecordsSeen,
+  _disarmDropRecorder: disarmDropRecorder,
 };
+
+// ── Recorder control (test-only) ───────────────────────────────────────────
+// Arm before the runs under test, read after, disarm when done. Arming resets:
+// a suite that arms twice measures the second stretch, not both.
+export function armDropRecorder() { dropRecorder = []; dropRecorderSeen = 0; return true; }
+
+// A copy, so a caller cannot mutate the recorder's own array out from under a
+// later read.
+export function dropRecords() { return dropRecorder ? dropRecorder.slice() : []; }
+
+// The control described above. Read it BEFORE disarming.
+export function dropRecordsSeen() { return dropRecorderSeen; }
+
+export function disarmDropRecorder() { dropRecorder = null; }
 
 // Pseudonymous user reference for logs (never the raw phone). Prefers the
 // internal app_users uuid (a non-PII surrogate); falls back to a phone

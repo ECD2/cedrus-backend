@@ -23,7 +23,8 @@ mksums() {
     src/services/cos/client.js src/services/cos/compose.js \
     src/services/cos/ledger.js src/services/cos/reader.js \
     src/services/cos/renderer.js \
-    src/services/cos/resendTransport.js > "$out"
+    src/services/cos/resendTransport.js \
+    src/utils/logger.js > "$out"
   echo "$out"
 }
 SNAPSHOT=$(mksums)
@@ -321,6 +322,33 @@ mutate "the pre-check is applied to writeback-only, which must never be blocked"
   src/jobs/cosDailyBrief.js \
   "  if (modeName === 'live') {" \
   "  if (modeName === 'live' || modeName === 'writeback_only') {"
+
+echo ""
+echo "-- guard 14: the logger allowlist and its drop detector --"
+# Removing ONE of the six recovered fields must be enough. Each is asserted by
+# name and each rides a real emitted event, so a partial regression cannot hide
+# behind the other five.
+mutate "a recovered field ('considered') is removed from the allowlist" \
+  src/utils/logger.js \
+  "  'considered', 'eligible_total', 'total_is_floor'," \
+  "  'eligible_total', 'total_is_floor',"
+mutate "a recovered field ('subject_chars') is removed from the allowlist" \
+  src/utils/logger.js \
+  "  'priorities', 'cited_records', 'subject_chars'," \
+  "  'priorities', 'cited_records',"
+# The detector itself. If droppedFields() can be stubbed to report nothing while
+# the suite stays green, then "no CoS event dropped a field" is not evidence of
+# anything — it is the II.2 control that does not discriminate.
+mutate "the drop detector always reports nothing" \
+  src/utils/logger.js \
+  "  if (!fields || typeof fields !== 'object') return [];" \
+  "  if (fields || typeof fields !== 'object') return [];"
+# And the seen-counter, which is the control proving the detector was pointed at
+# this suite's events rather than at nothing at all.
+mutate "the recorder counts no events, making the empty result vacuous" \
+  src/utils/logger.js \
+  "    dropRecorderSeen++;" \
+  "    dropRecorderSeen += 0;"
 
 echo ""
 echo "=== RESULT: $PASSED guards proven live, $MISSED missed ==="
