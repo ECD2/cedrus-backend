@@ -53,11 +53,17 @@ has_nul() {
   perl -0777 -ne 'exit(index($_, chr(0)) >= 0 ? 0 : 1)' "$1"
 }
 
-# There are currently ZERO legitimately-binary tracked files (verified
-# 2026-08-18: 410 tracked, all text/mime-encoding non-binary). If a real binary
-# asset is ever committed, add its exact path here — one per line — rather than
-# weakening the check. An entry is a deliberate, reviewable exemption.
-ALLOWLIST=""
+# Legitimately-binary tracked files, exact paths, one per line. Everything else
+# is scanned. Adding an entry is a deliberate, reviewable exemption — never
+# widen this to a pattern, and never weaken the check itself.
+#
+# 2026-08-18: ZERO entries; 410 tracked files, all non-binary.
+# 2026-08-28: the V9 interface was vendored into web/. It ships three real
+# photographs used as program artwork. They are the first genuinely binary
+# tracked files in this repo.
+ALLOWLIST="web/public/v8/pickleball.png
+web/public/v8/travel.png
+web/public/v8/triathlon.png"
 
 echo "=== repo integrity: no NUL bytes in tracked files ==="
 
