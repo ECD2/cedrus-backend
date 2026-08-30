@@ -30,7 +30,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { createHash } from 'node:crypto';
-import { cosSelect, cosInsertTodayBrief } from './client.js';
+import { cosSelectAcrossAllUsers, cosInsertTodayBrief } from './client.js';
 import { BRIEF_SCHEMA_VERSION, collectSourceRefs } from './compose.js';
 import { logger } from '../../utils/logger.js';
 
@@ -59,33 +59,73 @@ export function fingerprint(input) {
 /** How long the CoS app should consider this brief current. CoS uses 12 hours. */
 export const BRIEF_TTL_MS = 12 * 3600_000;
 
-let cachedUserId = null;
+// Keyed by the user being resolved, NOT a single slot.
+//
+// This was `let cachedUserId = null` — one process-global value. With one owner
+// that was a harmless memo. With N users iterating inside one process it is a
+// cross-user leak with no read involved: user A resolves first and populates
+// the slot, then user B's writeback reads A's id out of it and B's brief is
+// inserted into CoS attributed to A. The brief would appear in the wrong
+// person's app and vanish from the right one's.
+//
+// A Map keyed by the requested user makes the wrong answer unreachable: a miss
+// resolves, a hit can only ever return the value stored under that same key.
+const cachedUserIds = new Map();
 
 /** Test seam. */
-export function resetCosUserId() { cachedUserId = null; }
+export function resetCosUserId() { cachedUserIds.clear(); }
 
 /**
  * Whose brief this is.
  *
  * Preference order, and why:
- *   1. COS_USER_ID — explicit, and the only one that works on a CoS project
- *      with no briefs yet.
- *   2. The newest today_briefs row's user_id — CoS is single-owner
- *      (owner_session_ok() derives the subject from auth.uid() and there is one
- *      allow-listed owner), so any existing brief row names that owner. This
- *      exists so arming does not require hunting a uuid out of a dashboard.
+ *   1. `cosUserId` — this person's own CoS user id, read from
+ *      user_settings.cos_user_id by the caller. THE MULTI-USER PATH. When a
+ *      user is named, this returns their id and nothing else is consulted:
+ *      no env var, no cache, no derivation.
+ *   2. COS_USER_ID — the single-owner deploy. Still supported because it is
+ *      what production runs on today, and Session B is what replaces it.
+ *   3. The newest today_briefs row's user_id — a BOOTSTRAP convenience so
+ *      arming did not require hunting a uuid out of a dashboard.
+ *
+ * ── WHY 3 IS ONLY REACHABLE WHEN NOBODY NAMED A USER ────────────────────────
+ * "The newest brief row" identifies the owner only while there is exactly one
+ * owner. With N people it names whoever ran most recently, which is an
+ * arbitrary user, and it would announce success while doing it. So the
+ * derivation is now unreachable once a caller names a user: if you asked for
+ * a specific person, you get that person or nothing.
+ *
+ * The derive path reads across users by necessity — it is asking "who owns
+ * this project?", which cannot be scoped to an answer it does not yet have.
+ * That makes it the second legitimate cross-user read in the system, so it
+ * goes through cosSelectAcrossAllUsers and says so in the log every time.
  *
  * Which path was used is ANNOUNCED, because "derived it" and "was told it" are
  * different levels of confidence and the log should not blur them.
  */
-export async function resolveCosUserId({ env = process.env } = {}) {
+export async function resolveCosUserId({ env = process.env, cosUserId = null } = {}) {
+  if (typeof cosUserId === 'string' && cosUserId.trim() !== '') {
+    return { userId: cosUserId.trim(), source: 'settings' };
+  }
+
   const explicit = (env.COS_USER_ID || '').trim();
   if (explicit) return { userId: explicit, source: 'env' };
-  if (cachedUserId) return { userId: cachedUserId, source: 'derived-cached' };
 
-  const { rows, error, disarmed } = await cosSelect('today_briefs', (q) => q
+  // Keyed by the CoS project, because that is honestly what a derived owner is
+  // a property of. The old single `cachedUserId` slot was keyed by nothing,
+  // which is how it could hand user A's id to a lookup for user B.
+  const projectKey = (env.COS_SUPABASE_URL || '').trim();
+  if (cachedUserIds.has(projectKey)) {
+    return { userId: cachedUserIds.get(projectKey), source: 'derived-cached' };
+  }
+
+  const { rows, error, disarmed } = await cosSelectAcrossAllUsers('today_briefs', (q) => q
     .order('generated_at', { ascending: false })
-    .limit(1), { env, columns: 'user_id' });
+    .limit(1), {
+    env,
+    columns: 'user_id',
+    reason: 'bootstrap: deriving the single CoS owner because no user was named and COS_USER_ID is unset',
+  });
 
   if (disarmed) return { userId: null, source: 'disarmed' };
   if (error || !rows || rows.length === 0 || !rows[0].user_id) {
@@ -93,19 +133,21 @@ export async function resolveCosUserId({ env = process.env } = {}) {
       level: 'error',
       error_category: 'config',
       message:
-        'Cannot determine the CoS owner user_id: COS_USER_ID is unset and no existing today_briefs row ' +
-        'could be read to derive it. Set COS_USER_ID to the owner uuid. The brief will not be written back.',
+        'Cannot determine the CoS owner user_id: no user was named, COS_USER_ID is unset, and no existing ' +
+        'today_briefs row could be read to derive it. Set user_settings.cos_user_id for this person ' +
+        '(or COS_USER_ID for a single-owner deploy). The brief will not be written back.',
     });
     return { userId: null, source: 'unresolved' };
   }
 
-  cachedUserId = String(rows[0].user_id);
+  const derived = String(rows[0].user_id);
+  cachedUserIds.set(projectKey, derived);
   logger.event('cos.owner.derived', {
     outcome: 'derived',
-    message: 'CoS owner user_id derived from the most recent today_briefs row (COS_USER_ID is unset). ' +
-      'Set COS_USER_ID to pin it explicitly.',
+    message: 'CoS owner user_id derived from the most recent today_briefs row (no user named, COS_USER_ID unset). ' +
+      'This is single-owner behaviour: set user_settings.cos_user_id per person before adding a second user.',
   });
-  return { userId: cachedUserId, source: 'derived' };
+  return { userId: derived, source: 'derived' };
 }
 
 /**
@@ -158,8 +200,9 @@ export function buildBriefRow({ userId, brief, minimizedInput, model, latencyMs,
  */
 export async function writeBriefToCos({
   brief, minimizedInput, model, latencyMs, tokens = null, env = process.env, now = new Date(),
+  cosUserId = null,
 }) {
-  const { userId, source } = await resolveCosUserId({ env });
+  const { userId, source } = await resolveCosUserId({ env, cosUserId });
   if (!userId) {
     return { id: null, skipped: true, reason: source === 'disarmed' ? 'disarmed' : 'no_user_id' };
   }

@@ -15,7 +15,8 @@
 // This module NEVER exports the raw Supabase client. It exports exactly two
 // verbs:
 //
-//   cosSelect(table, build)     — read, and only from READABLE_TABLES
+//   forUser(userId).select(table, build) — read, only from READABLE_TABLES,
+//                                 and only that user's rows
 //   cosInsertTodayBrief(row)    — the single permitted write, hard-pinned to
 //                                 the literal string 'today_briefs'
 //
@@ -24,6 +25,36 @@
 // the write path. Making this module write to a second table requires EDITING
 // THIS FILE — it cannot be done from a caller. That is the structural claim,
 // and Bundle 38 asserts it against the module's real export surface.
+//
+// ── THE STRUCTURAL ISOLATION GUARANTEE (2026-08-30, multi-user) ─────────────
+// This module connects with COS_SERVICE_ROLE_KEY. Service role BYPASSES
+// row-level security by design. RLS therefore cannot be the isolation boundary
+// on this path — every read must carry an explicit user_id filter, and
+// something must make that structural rather than remembered.
+//
+// Until 2026-08-30 the read verb was `cosSelect(table, build)`, where `build`
+// COULD narrow by user and simply never did: all eight readers in reader.js
+// issued zero .eq('user_id', …). With one owner that returned the right rows by
+// accident. With two people it returns the other person's workstreams,
+// decisions and email excerpts.
+//
+// So `cosSelect` is gone from the export surface. The only door is:
+//
+//   forUser(userId).select(table, build)
+//
+// which applies .eq('user_id', userId) BEFORE `build` ever sees the query.
+// PostgREST builders are additive — a filter cannot be removed once applied —
+// so `build` can narrow further and cannot widen. forUser() itself throws on a
+// missing or malformed id, so an unscoped read is not discouraged, it is
+// unexpressible: there is no argument you can pass to reach one.
+//
+// This is the same property that makes cosInsertTodayBrief's pinned table a
+// guarantee rather than a convention. The table is not a parameter there; the
+// user is not optional here.
+//
+// THE ONE LEGITIMATE CROSS-USER READ is the admin panel's user list, and it
+// goes through `cosSelectAcrossAllUsers`, which is named so that it cannot be
+// called by accident and announces itself in the log every time.
 //
 // DISARMED BY DEFAULT (Lesson 7)
 // COS_SUPABASE_URL and COS_SERVICE_ROLE_KEY unset ⇒ DISARMED. Disarmed is a
@@ -201,7 +232,20 @@ export async function withReadRetry(run, { label = 'read', attempts = READ_RETRY
   return { ...last, attempts };
 }
 
-export async function cosSelect(table, build, { env = process.env, columns = '*', sleep } = {}) {
+/** The sentinel for a deliberate cross-user read. Module-private on purpose. */
+const ALL_USERS = Symbol('cos.all_users');
+
+/**
+ * The one read implementation. NOT EXPORTED — the only ways in are
+ * forUser(id).select() and cosSelectAcrossAllUsers(), so there is no exported
+ * symbol that can run a query with `scope` omitted.
+ *
+ * `scope` is either { userId } or the explicit cross-user sentinel. It is a
+ * required positional argument rather than an option with a default, because a
+ * default is exactly how "forgot to scope it" becomes "silently read
+ * everyone".
+ */
+async function runSelect(scope, table, build, { env = process.env, columns = '*', sleep } = {}) {
   if (!READABLE_TABLES.includes(table)) {
     throw new Error(
       `cosSelect refused: '${table}' is not in READABLE_TABLES. ` +
@@ -213,6 +257,9 @@ export async function cosSelect(table, build, { env = process.env, columns = '*'
   try {
     const result = await withReadRetry(async () => {
       let query = client.from(table).select(columns);
+      // The scoping filter is applied BEFORE `build`. PostgREST builders are
+      // additive, so `build` may narrow further and cannot remove this.
+      if (scope !== ALL_USERS) query = query.eq('user_id', scope.userId);
       if (typeof build === 'function') query = build(query) || query;
       return await query;
     }, { label: table, ...(sleep ? { sleep } : {}) });
@@ -229,12 +276,72 @@ export async function cosSelect(table, build, { env = process.env, columns = '*'
 }
 
 /**
+ * The scoping wrapper. THE ONLY DOOR to a CoS read.
+ *
+ * Throws on a missing, non-string or blank user id rather than returning an
+ * empty scope. An empty scope would read as "found nothing", and "I was not
+ * told whose data to read" must never be indistinguishable from "that person
+ * has no records" — that is the fail-closed shape the whole reader is built
+ * around (Lesson 1).
+ *
+ * Returns a frozen object so a caller cannot monkey-patch the scope out of it.
+ */
+export function forUser(userId) {
+  if (typeof userId !== 'string' || userId.trim() === '') {
+    throw new Error(
+      'forUser refused: a CoS read requires an explicit user id. ' +
+      'Service role bypasses RLS, so an unscoped read returns every user\'s rows. ' +
+      `Received: ${userId === undefined ? 'undefined' : JSON.stringify(userId)}`);
+  }
+  const scope = Object.freeze({ userId: userId.trim() });
+  return Object.freeze({
+    userId: scope.userId,
+    select(table, build, opts) { return runSelect(scope, table, build, opts); },
+  });
+}
+
+/**
+ * The ONE legitimate cross-user read: the admin panel's user list.
+ *
+ * Named at length so it cannot be reached by a typo or a hurried
+ * find-and-replace, and so a reviewer seeing it in a diff knows immediately
+ * that a cross-user read is being claimed. Every call announces itself — a
+ * privileged read that leaves no trace is one nobody can audit after the fact.
+ *
+ * `reason` is required for the same purpose: the log line has to say WHY, or
+ * the event is just noise that proves a rule was bypassed without saying what
+ * for.
+ */
+export async function cosSelectAcrossAllUsers(table, build, { reason, ...opts } = {}) {
+  if (typeof reason !== 'string' || reason.trim() === '') {
+    throw new Error(
+      'cosSelectAcrossAllUsers refused: a cross-user read must state a `reason`. ' +
+      'If you did not mean to read across users, use forUser(userId).select().');
+  }
+  logger.event('cos.read.cross_user', {
+    outcome: 'deliberate',
+    message: `CROSS-USER CoS read of ${table} — ${reason.trim()}`,
+  });
+  return runSelect(ALL_USERS, table, build, opts);
+}
+
+/**
  * The ONLY write. The table is the pinned constant, not an argument.
  *
  * Returns { id, error }. A failed insert is announced and returns id: null —
  * the caller decides what that means; this never pretends a write landed.
  */
 export async function cosInsertTodayBrief(row, { env = process.env } = {}) {
+  // The table is pinned; the OWNER must be explicit. A row without user_id
+  // would insert a brief belonging to nobody, which CoS's own reader would
+  // never surface and no user-scoped read would ever find again — a silent
+  // write into a hole. Throwing is right here: unlike a read, there is no
+  // "found nothing" to degrade to.
+  if (!row || typeof row.user_id !== 'string' || row.user_id.trim() === '') {
+    throw new Error(
+      'cosInsertTodayBrief refused: the row must carry an explicit user_id. ' +
+      'A brief with no owner is unreachable by every user-scoped read.');
+  }
   const client = cosClient(env);
   if (!client) return { id: null, error: null, disarmed: true };
 

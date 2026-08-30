@@ -130,13 +130,18 @@ function briefCiting(refs, over = {}) {
   };
 }
 
+// The owner every armed run resolves to. runCosDailyBrief() now resolves the
+// user BEFORE it reads anything, and the ledger key is per user per day, so the
+// tests have to build the same key the job does.
+const OWNER = 'cos-owner-uuid';
+
 const ARMED_ENV = {
   COS_SUPABASE_URL: 'https://cos.invalid',
   COS_SERVICE_ROLE_KEY: 'cos-key',
   COS_BRIEF_LIVE: 'true',
   RESEND_API_KEY: 're_test',
   COS_BRIEF_TO: 'owner@example.test',
-  COS_USER_ID: 'cos-owner-uuid',
+  COS_USER_ID: OWNER,
 };
 
 // Every send is counted at the fetch boundary of the REAL ResendTransport.
@@ -989,7 +994,7 @@ section('the ledger blocks a double send');
   const r1 = await runCosDailyBrief({ env: ARMED_ENV, now, deps: first.deps });
   ok('CONTROL: the first run of the day SENDS', sends.length === 1 && r1.sent === true, { sends: sends.length, r1 });
   ok('the send really hit the Resend endpoint', sends[0].url === 'https://api.resend.com/emails', sends[0].url);
-  ok('ledger row marked sent', db.rows.get(ledger.ledgerKey(now)).status === 'sent', db.rows.get(ledger.ledgerKey(now)));
+  ok('ledger row marked sent', db.rows.get(ledger.ledgerKey({ userId: OWNER, now })).status === 'sent', db.rows.get(ledger.ledgerKey({ userId: OWNER, now })));
 
   // THE PRECHECK IS FORCED OPEN FOR THIS RUN, DELIBERATELY.
   //
@@ -1012,7 +1017,7 @@ section('the ledger blocks a double send');
   // still refuses (the INSERT collides), so `reason` alone cannot tell them
   // apart — the mutation run proved that mask. Only the read path can return
   // the stored sent_at, because the collision path never saw the row.
-  const readPath = await ledger.claimSend({ now, db });
+  const readPath = await ledger.claimSend({ userId: OWNER, now, db });
   ok('the already-sent check answers from the READ path, not the collision',
     readPath.claimed === false && readPath.reason === 'already_sent' && typeof readPath.sentAt === 'string',
     readPath);
@@ -1026,9 +1031,9 @@ section('the ledger blocks a double send');
 
   // Two claims in sequence: the second sees the un-finished row and refuses.
   const raceDb = fakeDb();
-  const k = ledger.ledgerKey(now);
-  const a = await ledger.claimSend({ now, db: raceDb });
-  const b = await ledger.claimSend({ now, db: raceDb });
+  const k = ledger.ledgerKey({ userId: OWNER, now });
+  const a = await ledger.claimSend({ userId: OWNER, now, db: raceDb });
+  const b = await ledger.claimSend({ userId: OWNER, now, db: raceDb });
   ok('first claim wins', a.claimed === true && a.key === k);
   ok('a second claim over an unfinished one REFUSES', b.claimed === false && b.claimed !== true, b);
 
@@ -1055,8 +1060,8 @@ section('the ledger blocks a double send');
     };
   })();
   const [ra, rb] = await Promise.all([
-    ledger.claimSend({ now, db: collideDb }),
-    ledger.claimSend({ now, db: collideDb }),
+    ledger.claimSend({ userId: OWNER, now, db: collideDb }),
+    ledger.claimSend({ userId: OWNER, now, db: collideDb }),
   ]);
   const winners = [ra, rb].filter((x) => x.claimed).length;
   ok('TRUE RACE: exactly ONE of two concurrent claims wins', winners === 1, { ra, rb });
@@ -1066,13 +1071,13 @@ section('the ledger blocks a double send');
   // A stuck 'claimed' row fails CLOSED rather than risking a duplicate.
   const stuckDb = fakeDb();
   stuckDb.rows.set(k, { status: 'claimed', claimed_at: now.toISOString() });
-  const stuck = await ledger.claimSend({ now, db: stuckDb });
+  const stuck = await ledger.claimSend({ userId: OWNER, now, db: stuckDb });
   ok('a stuck in-flight claim refuses to send (fails closed)', stuck.claimed === false && stuck.reason === 'in_flight', stuck);
 
   // An unreadable ledger also fails closed — the opposite of the budget guard,
   // and deliberately so.
   const brokenDb = { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: { code: '42P01', message: 'no such table' } }) }) }) }) };
-  const broken = await ledger.claimSend({ now, db: brokenDb });
+  const broken = await ledger.claimSend({ userId: OWNER, now, db: brokenDb });
   ok('an unreadable ledger fails CLOSED (no send)', broken.claimed === false && broken.reason === 'ledger_unreadable', broken);
 }
 
@@ -1086,7 +1091,7 @@ section('pre-check — a day already sent costs nothing to refuse');
   // open on purpose to keep testing the 23505 race it cannot cover.
   const brief = briefCiting([{ type: 'open_loop', id: IDS.loop }]);
   const NOW_P = new Date('2026-08-26T11:00:00Z');
-  const KEY = ledger.ledgerKey(NOW_P);
+  const KEY = ledger.ledgerKey({ userId: OWNER, now: NOW_P });
 
   // Counts the two expensive steps the precheck exists to skip.
   function countingDeps(opts) {
@@ -1187,11 +1192,11 @@ section('pre-check — a day already sent costs nothing to refuse');
       maybeSingle: async () => ({ data: null, error: { code: '42P01', message: 'no such table' } }),
     }) }) }),
   };
-  const unavailable = await ledger.alreadySentToday({ now: NOW_P, db: errRead });
+  const unavailable = await ledger.alreadySentToday({ userId: OWNER, now: NOW_P, db: errRead });
   ok('alreadySentToday: an error is unavailable, NOT blocked',
     unavailable.blocked === false && unavailable.unavailable === true &&
     unavailable.errorCode === '42P01', unavailable);
-  const clean = await ledger.alreadySentToday({ now: NOW_P, db: fakeDb() });
+  const clean = await ledger.alreadySentToday({ userId: OWNER, now: NOW_P, db: fakeDb() });
   ok('CONTROL: a clean empty ledger is simply not blocked',
     clean.blocked === false && clean.unavailable === undefined, clean);
 
@@ -1199,7 +1204,7 @@ section('pre-check — a day already sent costs nothing to refuse');
   reset();
   const dbYesterday = fakeDb();
   const YESTERDAY = new Date('2026-08-25T11:00:00Z');
-  const YKEY = ledger.ledgerKey(YESTERDAY);
+  const YKEY = ledger.ledgerKey({ userId: OWNER, now: YESTERDAY });
   ok('the two days really are different keys', YKEY !== KEY, { YKEY, KEY });
   dbYesterday.rows.set(YKEY, { status: 'sent', sent_at: YESTERDAY.toISOString() });
   const dayRun = countingDeps({ brief, db: dbYesterday });
@@ -1208,7 +1213,7 @@ section('pre-check — a day already sent costs nothing to refuse');
   ok('...the model was called for today', dayRun.counts.models === 1, dayRun.counts);
   ok("...and yesterday's row is untouched",
     dbYesterday.rows.get(YKEY).sent_at === YESTERDAY.toISOString(), dbYesterday.rows.get(YKEY));
-  const yCheck = await ledger.alreadySentToday({ now: NOW_P, db: dbYesterday });
+  const yCheck = await ledger.alreadySentToday({ userId: OWNER, now: NOW_P, db: dbYesterday });
   ok('the precheck reads TODAY\'s key only', yCheck.blocked === true && yCheck.reason === 'already_sent', yCheck);
 
   // ── (8) the rehearsal rungs ignore the precheck entirely ─────────────────
@@ -1590,7 +1595,7 @@ section('the reader module is structurally write-only-to-today_briefs');
   // A table not on the list cannot be reached at all — it throws rather than
   // silently returning nothing.
   let refusedTable = false;
-  try { await clientMod.cosSelect('email_sources', (q) => q, { env: ARMED_ENV }); }
+  try { await clientMod.forUser(OWNER).select('email_sources', (q) => q, { env: ARMED_ENV }); }
   catch (e) { refusedTable = /not in READABLE_TABLES/.test(e.message); }
   ok('a non-allowlisted table is REFUSED, not silently empty', refusedTable);
 }

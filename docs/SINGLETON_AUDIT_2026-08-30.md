@@ -1,0 +1,81 @@
+# Singleton audit — every place the system assumes exactly one person
+
+**2026-08-30 · Session A · branch `feat/multiuser-foundation-2026-08-30`**
+
+Produced by grepping the whole of `src/`, not from memory. Every row carries a
+`file:line` that was read. This document is the map for Sessions B–E.
+
+**Method.** The commands, recorded so the count is reproducible rather than
+trusted (the canon's own bundle-registry line has gone stale twice for exactly
+the lack of this):
+
+```sh
+grep -rn "COS_USER_ID\|COS_BRIEF_USAGE_USER_ID\|COS_BRIEF_TO\|resolveCosUserId" src/ --include='*.js'
+grep -rn "ledgerKey\|LEDGER_KEY_PREFIX" src/ --include='*.js'
+grep -rn "TESTER_PHONES\|ALLOWED_PHONES" src/ --include='*.js'
+grep -rn "BRIEF_EMAIL_" src/ --include='*.js'
+grep -rn "\.single()\|\.maybeSingle()" src/ --include='*.js' | grep -iE "app_users|user|auth_user"
+grep -rn "cosSelect\|cosInsertTodayBrief" src/ --include='*.js'
+```
+
+**Scope note.** Two databases are in play and they are not the same project.
+Cedrus's own backend is `qjwbtlnwnjjuvrwblkzx` (confusingly named `cedrus-dev`;
+it is production) and holds `app_users`, `system_flags`, `people`, `reminders`.
+Chief of Staff is `kpzyzjhfvjfvxowhusir` and holds `workstreams`, `open_loops`,
+`decisions`, `captures`, `agent_runs`, `email_messages`, `today_briefs`. Every
+CoS table carries `user_id` already (verified against
+`cos_live_reads_2026-08-26.json`, 155 columns across 8 tables), so multi-user
+works across both databases without a schema change on the CoS side.
+
+---
+
+## The findings
+
+| # | file:line | What it assumes | What breaks with a second person | Fixed |
+|---|---|---|---|---|
+| 1 | `src/services/cos/ledger.js:53-55` | `ledgerKey(now)` returns `cos_brief_send:<date>` — **one claim per day globally** | The first brief composed claims the day. Every later user is refused `already_sent` on the **fail-closed** path, which is byte-identical to correct duplicate-prevention in the logs. Dad's brief never arrives and nothing says so. | **Session A (§D)** |
+| 2 | `src/services/cos/reader.js:178-315` | All eight readers (`readWorkstreams`, `readOpenLoops`, `readDecisions`, `readCaptures`, `readAgentRuns`, `readEmailMessages`, `readEmailAnalyses`, `readRecentBriefs`) issue **zero `.eq('user_id', …)`** | Service role bypasses RLS. Every read returns **every user's rows**. User A's workstreams, open loops, decisions and *email excerpts* are composed into user B's brief. This is the widest leak in the codebase. | **Session A (§C)** — `forUser()` makes the unscoped call unexpressible |
+| 3 | `src/services/cos/reader.js:23-27` | Header comment: *"these reads are not user-scoped in SQL — service_role sees every row and there is one owner's worth of rows"* | The comment is the *justification* for finding 2 and is now false. Left in place it will talk a future session out of the fix. | **Session A (§C)** — comment rewritten |
+| 4 | `src/services/cos/client.js:204` | `cosSelect(table, build)` — `build` **may** narrow, nothing requires it | The isolation boundary is a convention a caller can forget. Contrast `cosInsertTodayBrief`, whose pinned table is a guarantee because the table is not a parameter. | **Session A (§C)** |
+| 5 | `src/services/cos/writer.js:62,81-107` | `resolveCosUserId()` reads one `COS_USER_ID`, **and memoizes it in module-level `cachedUserId`** | Two failures, not one. (a) One env var names one owner. (b) The cache is process-global: iterating users in one process, user A's id is returned for user B, so **B's brief is written back attributed to A**. Not named in the amendment — found by reading the file. | **Session A (§C)** — cache keyed per user; **Session B** wires the iteration |
+| 6 | `src/services/cos/writer.js:86` | The fallback derives the owner from the newest `today_briefs` row | With N users the newest row belongs to whoever ran last. The derivation returns an arbitrary user and announces success. | **Session A (§C)** — refuses to derive when a user id is required |
+| 7 | `src/services/cos/resendTransport.js:60,66,99,118` | `COS_BRIEF_TO` is **the** recipient; the transport refuses to construct without it | One recipient address for the whole deploy. Two users means one of them gets the other's brief, or a redeploy per person. | **Session B** — `user_settings.brief_email` (column added in §B) |
+| 8 | `src/jobs/cosDailyBrief.js:457-469` | `COS_BRIEF_USAGE_USER_ID` is one uuid; all token spend is booked to it | Every user's model spend is attributed to one person. Per-user budgets and any future quota are wrong from the first day. | **Session B** — `user_settings.usage_user_id` |
+| 9 | `src/jobs/cosDailyBrief.js:140` | `runCosDailyBrief()` composes exactly **one** brief per tick | The 11:00 UTC job must iterate an allowlist: one composition, one ledger claim, one recipient, one spend record **each**. | **Session B** |
+| 10 | `src/jobs/scheduler.js:52` | `spec: '0 11 * * *'` — one hard-coded hour for everyone | `user_settings.brief_hour_utc` exists after §B but nothing reads it; a user in another timezone cannot have a different hour without a deploy. | **Session B** |
+| 11 | `src/routes/api/auth.js:69-84` | `requireUser` checks the token and the `app_users` link, and **nothing else** | A suspended or revoked account still authenticates and reads. There is no `account_status`, no role, no capability — so revoking access means deleting the auth user. | **Session A (§B/§C)** — `account_status`, `role`, `user_capabilities` |
+| 12 | `src/routes/admin.js:121-132`, `src/routes/adminPanel.js:112,148` | Admin is a **TOTP session plus a `TESTER_PHONES` env allowlist**, not a user attribute | There is no way to say "Emil is admin, dad is a member" in data. `adminPanel.js:148` documents the provisioning step as *"edit the env var in Railway → Variables, then redeploy"* — the fifth user is a deploy, not a click. | `role` column **Session A (§B)**; panel **Session D** |
+| 13 | `src/config.js:57,65` | `TESTER_PHONES` / `ALLOWED_PHONES` parsed once at **boot** | Adding dad's number requires a redeploy, and the technical step (allowlist) is not the compliance step (`sms_consent_at` + a `consent_events` row). Both columns already exist (`src/services/users.js:32`, `src/services/webOnboarding.js:95`). | **Session D** (provisioning writes both) |
+| 14 | `src/services/cos/client.js:110-123` | `cached` / `cachedKey` memoize one CoS client | Correct as written — the fingerprint is `url\u0000key`, which does not vary per user. **No change needed.** Recorded so a future session does not "fix" it. | No fix needed |
+| 15 | `src/jobs/briefEmail.js:157-168` | — | **Already correct.** `getUsersDueForEmail` selects all subscribed users and filters by each user's own timezone and `brief_day`/`brief_time`. This is the shape the CoS brief needs in Session B; copy it rather than inventing one. | No fix needed |
+| 16 | `src/pipeline/index.js:30` → `src/services/users.js:19` | — | **Already correct.** `findOrCreateByPhone(From)` resolves the sender to a user, and `src/lib/smsAllowlist.js` gates it. One Twilio number serves both people; no second number is needed. | No fix needed |
+| 17 | `src/lib/twilio.js:63` | — | **Already correct.** `sendSms()` is a single choke point, so a per-user check added there cannot be bypassed by later code. | No fix needed (Session B adds the check) |
+| 18 | `src/services/users.js:55,69` | `getShowingUpCount` / `getTotalBriefsSent` use `.single()` on `app_users` by id | Correct today — `.eq('id', userId).single()`. Recorded because `.single()` on a user lookup is the shape that becomes a leak if the filter is ever dropped. | No fix needed |
+| 19 | `src/services/cos/reader.js:239` | `readEmailMessages` reads `plain_text_excerpt` — real message bodies | Combined with finding 2 this is the most sensitive half of the leak: not metadata, **the content of another person's mail** in a brief. Called out separately because it changes the severity of 2 from "wrong data" to "privacy breach". | **Session A (§C)** |
+
+---
+
+## What this session fixes, and what it deliberately does not
+
+**Fixed in Session A:** findings 1, 2, 3, 4, 5, 6, 11, 19 — the ledger key, the
+scoping boundary in code, the owner-resolution cache, and the role /
+capability / status vocabulary in the schema.
+
+**Left for Session B (per-user brief):** 7, 8, 9, 10 — the job that iterates.
+Everything it needs (`user_settings.brief_email`, `brief_hour_utc`,
+`usage_user_id`, `cos_user_id`) is created by this session's migration, so
+Session B is code only and applies no DDL.
+
+**Left for Session D (admin panel and provisioning):** 12, 13 — invite, revoke,
+set capabilities, record consent, write the audit row.
+
+**No change needed:** 14, 15, 16, 17, 18 — recorded so a later session does not
+spend a night re-deciding them, and so 15/16/17 are copied rather than reinvented.
+
+## The rule this audit exists to enforce
+
+Environment variables keep exactly two jobs from here on: **secrets**, and
+**global arming switches** (`COS_BRIEF_LIVE`, budget ceilings). Every variable
+in findings 7, 8, 10 and 13 is a per-person value living in the environment;
+each one is a column after §B. Anything that differs per person lives in the
+database, or the fifth user is a deploy instead of a click.

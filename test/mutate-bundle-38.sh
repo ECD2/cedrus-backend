@@ -16,6 +16,10 @@ MISSED=0
 
 # Checksums of every file this script mutates, so the restore can be PROVEN
 # rather than assumed.
+# Every file this script mutates. The restore trap iterates this list, so a
+# file added to a mutate() call below must be added here too.
+MUTATED_FILES="src/jobs/cosDailyBrief.js src/jobs/scheduler.js src/services/cos/client.js src/services/cos/compose.js src/services/cos/ledger.js src/services/cos/reader.js src/services/cos/renderer.js src/services/cos/resendTransport.js src/utils/logger.js"
+
 mksums() {
   out=$(mktemp)
   shasum -a 256 \
@@ -28,6 +32,29 @@ mksums() {
   echo "$out"
 }
 SNAPSHOT=$(mksums)
+
+# ── the restore trap (added 2026-08-30) ─────────────────────────────────────
+# Without this, Ctrl-C (or a TERM) between `cp file file.bak` and
+# `mv file.bak file` leaves the source MUTATED on disk and a stray .bak beside
+# it. That is not hypothetical: it happened on 2026-08-26, and it was
+# reproduced deliberately before this trap was added — an interrupted run left
+# the mutated source in place. A harness that can silently corrupt the code it
+# is measuring is worse than no harness, because the damage only surfaces later
+# as an unrelated-looking failure.
+restore() {
+  __st=$?
+  for f in $MUTATED_FILES; do
+    if [ -f "$f.bak" ]; then
+      mv -f "$f.bak" "$f"
+      echo "  restored $f from an interrupted mutation"
+    fi
+  done
+  [ -n "${SNAPSHOT:-}" ] && rm -f "$SNAPSHOT"
+  exit $__st
+}
+trap restore EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 mutate() {
   desc="$1"; file="$2"; from="$3"; to="$4"
@@ -306,11 +333,11 @@ echo ""
 echo "-- guard 13: the send-ledger pre-check --"
 mutate "the pre-check never blocks (always reports not-sent)" \
   src/services/cos/ledger.js \
-  'export async function alreadySentToday({ now = new Date(), db = supabase } = {}) {
-  const key = ledgerKey(now);' \
-  'export async function alreadySentToday({ now = new Date(), db = supabase } = {}) {
+  'export async function alreadySentToday({ userId, now = new Date(), db = supabase } = {}) {
+  const key = ledgerKey({ userId, now });' \
+  'export async function alreadySentToday({ userId, now = new Date(), db = supabase } = {}) {
   return { blocked: false };
-  const key = ledgerKey(now);'
+  const key = ledgerKey({ userId, now });'
 mutate "an unreadable ledger ABORTS the run instead of continuing" \
   src/jobs/cosDailyBrief.js \
   '    if (pre.unavailable) {' \

@@ -65,7 +65,7 @@ import { minimizeInput, enforceTotalSize, isEmptyInput, validateBrief, buildRequ
 import { renderBriefEmail } from '../services/cos/renderer.js';
 import { createResendTransport, deliveryEnv } from '../services/cos/resendTransport.js';
 import { claimSend, markSent, releaseClaim, alreadySentToday } from '../services/cos/ledger.js';
-import { writeBriefToCos } from '../services/cos/writer.js';
+import { writeBriefToCos, resolveCosUserId } from '../services/cos/writer.js';
 
 /** Which model composes the brief. */
 export function briefModel(env = process.env) {
@@ -148,6 +148,7 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
     release = releaseClaim,
     write = writeBriefToCos,
     logRun = defaultLogRun,
+    resolveOwner = resolveCosUserId,
   } = deps;
 
   // ── mode, announced every run, armed or not (Lesson 7) ────────────────────
@@ -174,6 +175,39 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
   }[modeName];
   logger.event('cos.delivery.mode', { outcome: modeName, message: modeMessage });
 
+  // ── WHOSE brief is this? Resolved before anything is read ─────────────────
+  //
+  // Every CoS read is now scoped to one user (forUser(userId).select), and the
+  // send ledger claims one slot per user per day. Both need the id before any
+  // work starts, so it is resolved here rather than deep in the writeback where
+  // it used to live.
+  //
+  // Unresolved is FATAL to the run, and that is a deliberate change. Before
+  // multi-user, an unresolved owner only skipped the writeback: the brief was
+  // still composed and still emailed. That is no longer coherent — without an
+  // id there is no one whose records to gather, and composing from every user's
+  // rows is precisely the leak this session exists to close. Failing here costs
+  // one skipped run and says why; the alternative silently mails one person a
+  // brief built from everyone's data.
+  //
+  // This session still resolves exactly ONE owner per tick. Session B replaces
+  // this line with an iteration over the allowlist; everything downstream is
+  // already per-user and does not change again.
+  const owner = await resolveOwner({ env });
+  if (!owner.userId) {
+    logger.event('cos.brief.aborted', {
+      level: 'error',
+      error_category: owner.source === 'disarmed' ? 'config' : 'config',
+      outcome: 'fail_closed',
+      message:
+        `cannot determine whose brief to compose (${owner.source}) — refusing to read CoS unscoped. ` +
+        'Set COS_USER_ID, or user_settings.cos_user_id for this person. ' +
+        'Nothing gathered, nothing composed, nothing billed.',
+    });
+    return { ran: false, reason: 'no_user_id', sent: false, written: false };
+  }
+  const userId = owner.userId;
+
   // ── pre-check: has today already gone out? ────────────────────────────────
   //
   // A READ, before anything is gathered or composed. It does not replace the
@@ -198,7 +232,7 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
   // no mutation can turn red, which is exactly the shape briefMode() was
   // rewritten to remove (see its note above).
   if (modeName === 'live') {
-    const pre = await precheck({ now });
+    const pre = await precheck({ userId, now });
     if (pre.blocked) {
       logger.event('cos.brief.skipped_precheck', {
         outcome: pre.reason,
@@ -225,7 +259,7 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
   }
 
   // ── gather, failing closed on any unreadable table ────────────────────────
-  const gathered = await gather({ now, env });
+  const gathered = await gather({ now, env, userId });
   if (!gathered.ok) {
     if (gathered.reason === 'read_failed') {
       logger.event('cos.brief.aborted', {
@@ -328,7 +362,7 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
   if (writebackOnly) {
     const wroteOnly = await write({
       brief, minimizedInput: minimized, model: result.model || model,
-      latencyMs, tokens: totalTokens(result.usage), env, now,
+      latencyMs, tokens: totalTokens(result.usage), env, now, cosUserId: userId,
     });
     if (wroteOnly.skipped) {
       logger.event('cos.brief.writeback_only', {
@@ -367,7 +401,7 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
     });
   } else {
     // Claim BEFORE sending. The ledger's PK collision is the lock.
-    const claimResult = await claim({ now });
+    const claimResult = await claim({ userId, now });
     if (!claimResult.claimed) {
       return { ran: true, reason: claimResult.reason, sent: false, written: false, brief };
     }
@@ -384,7 +418,7 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
       sent = true;
       provider = out.provider;
       providerMessageId = out.providerMessageId;
-      await mark({ key: claimedKey, provider, providerMessageId, now });
+      await mark({ key: claimedKey, userId, provider, providerMessageId, now });
       logger.event('cos.send.ok', { outcome: 'sent', latency_ms: sendLatencyMs, message: `daily brief sent via ${provider}` });
     } catch (err) {
       // The transport throws BEFORE any network call when it is misconfigured
@@ -401,7 +435,7 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
             ? ' — nothing was transmitted; the day\'s claim is released for retry.'
             : ` — it is NOT known whether the message went out; the ledger row '${claimedKey}' stays claimed so no duplicate can follow.`),
       });
-      if (preNetwork) await release({ key: claimedKey, now });
+      if (preNetwork) await release({ key: claimedKey, userId, now });
       return { ran: true, reason: 'send_failed', sent: false, written: false, brief };
     }
   }
@@ -409,7 +443,7 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
   // ── writeback: the CoS app shows the same brief ───────────────────────────
   const written = await write({
     brief, minimizedInput: minimized, model: result.model || model,
-    latencyMs, tokens: totalTokens(result.usage), env, now,
+    latencyMs, tokens: totalTokens(result.usage), env, now, cosUserId: userId,
   });
 
   return {

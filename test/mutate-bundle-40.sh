@@ -20,12 +20,39 @@ MISSED=0
 # Checksum of every file this script mutates, so the restore is PROVEN rather
 # than assumed. `git diff` would not do: this branch legitimately carries
 # uncommitted work, so a dirty tree proves nothing either way.
+# Every file this script mutates. The restore trap iterates this list, so a
+# file added to a mutate() call below must be added here too.
+MUTATED_FILES="scripts/verify-brief-run.mjs"
+
 mksums() {
   out=$(mktemp)
   shasum -a 256 scripts/verify-brief-run.mjs > "$out"
   echo "$out"
 }
 SNAPSHOT=$(mksums)
+
+# ── the restore trap (added 2026-08-30) ─────────────────────────────────────
+# Without this, Ctrl-C (or a TERM) between `cp file file.bak` and
+# `mv file.bak file` leaves the source MUTATED on disk and a stray .bak beside
+# it. That is not hypothetical: it happened on 2026-08-26, and it was
+# reproduced deliberately before this trap was added — an interrupted run left
+# the mutated source in place. A harness that can silently corrupt the code it
+# is measuring is worse than no harness, because the damage only surfaces later
+# as an unrelated-looking failure.
+restore() {
+  __st=$?
+  for f in $MUTATED_FILES; do
+    if [ -f "$f.bak" ]; then
+      mv -f "$f.bak" "$f"
+      echo "  restored $f from an interrupted mutation"
+    fi
+  done
+  [ -n "${SNAPSHOT:-}" ] && rm -f "$SNAPSHOT"
+  exit $__st
+}
+trap restore EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 mutate() {
   desc="$1"; file="$2"; from="$3"; to="$4"
