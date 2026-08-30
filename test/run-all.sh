@@ -124,6 +124,14 @@ echo "=== Bundle 40 — verify-brief-run: post-deploy log verification ==="
 bun test/verify-brief-run.test.mjs
 
 echo ""
+echo "=== Bundle 41 — multi-user isolation (a user change must never leak a record) ==="
+# bun explicitly, not $RUNNER: top-level await + dynamic import.
+# Every assertion here carries a control. "User B got nothing" is worthless
+# without "the identical request returns data for user A", which is why both
+# halves run in the same test against the same fake.
+bun test/multiuser-isolation.test.mjs
+
+echo ""
 echo "=== CoS reader/schema conformance ==="
 # The ONLY stage that can catch a reader/schema mismatch. Every other suite
 # passes happily while one exists, because the reader, the composer and the

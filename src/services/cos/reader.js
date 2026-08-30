@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // CoS reader — typed reads over the eight tables the daily brief may see.
 //
-// Every function here goes through cosSelect(), which is pinned to
+// Every function here goes through forUser(userId).select(), which is pinned to
 // READABLE_TABLES and exposes no write verb. This module imports NOTHING that
 // can write except the single today_briefs insert re-exported by writer.js,
 // which is a separate module on purpose.
@@ -14,20 +14,27 @@
 //   2. A '*' read silently acquires every column a future CoS migration adds.
 //      Naming them means new columns arrive when someone decides they should.
 //
-// EVERY READ FAILS CLOSED. cosSelect returns rows: null on error (distinct
+// EVERY READ FAILS CLOSED. The scoped select returns rows: null on error (distinct
 // from []), and gatherCosInput() below turns any null into an aborted brief.
 // Composing a "daily brief" from three of eight tables because five queries
 // quietly errored is precisely the confident-false-success shape Lesson 1 is
 // about. A brief built on partial data is worse than no brief.
 //
-// SCOPE: single-owner. CoS is a one-owner app (owner_session_ok() derives the
-// subject from auth.uid() and there is exactly one allow-listed owner), so
-// these reads are not user-scoped in SQL — service_role sees every row and
-// there is one owner's worth of rows. COS_USER_ID, when set, narrows the
-// writeback to that owner's uuid; see writer.js.
+// SCOPE: PER USER, ENFORCED STRUCTURALLY (rewritten 2026-08-30, multi-user).
+// This comment used to read "single-owner ... these reads are not user-scoped
+// in SQL — service_role sees every row and there is one owner's worth of
+// rows." That was true of a one-person system and it was the justification for
+// eight unscoped reads. It is now false and dangerous: with a second person,
+// unscoped means every function here returns the other person's workstreams,
+// decisions, captures and email excerpts.
+//
+// Every read below now takes an explicit `userId` and goes through
+// forUser(userId).select(...), which applies .eq('user_id', userId) before the
+// per-table narrowing. There is no longer an exported verb that can read
+// without a user — see the isolation header in client.js.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { cosSelect } from './client.js';
+import { forUser } from './client.js';
 
 // Mirrors CoS's own LIMITS (supabase/functions/_shared/brief.ts). Deliberately
 // the SAME numbers: this brief is meant to be the same brief, composed
@@ -175,8 +182,8 @@ export const READER_COLUMNS = Object.freeze({
   today_briefs: Object.freeze(['id', 'schema_version', 'generation_mode', 'model', 'status', 'generated_at']),
 });
 
-export async function readWorkstreams(opts = {}) {
-  return cosSelect('workstreams', (q) => q
+export async function readWorkstreams({ userId, ...opts } = {}) {
+  return forUser(userId).select('workstreams', (q) => q
     .order('created_at', { ascending: false })
     .limit(COS_LIMITS.workstreams), {
     ...opts,
@@ -184,8 +191,8 @@ export async function readWorkstreams(opts = {}) {
   });
 }
 
-export async function readOpenLoops(opts = {}) {
-  return cosSelect('open_loops', (q) => q
+export async function readOpenLoops({ userId, ...opts } = {}) {
+  return forUser(userId).select('open_loops', (q) => q
     .order('created_at', { ascending: false })
     .limit(COS_LIMITS.open_loops), {
     ...opts,
@@ -193,8 +200,8 @@ export async function readOpenLoops(opts = {}) {
   });
 }
 
-export async function readDecisions(opts = {}) {
-  return cosSelect('decisions', (q) => q
+export async function readDecisions({ userId, ...opts } = {}) {
+  return forUser(userId).select('decisions', (q) => q
     .order('created_at', { ascending: false })
     .limit(COS_LIMITS.decisions), {
     ...opts,
@@ -202,8 +209,8 @@ export async function readDecisions(opts = {}) {
   });
 }
 
-export async function readCaptures(opts = {}) {
-  return cosSelect('captures', (q) => q
+export async function readCaptures({ userId, ...opts } = {}) {
+  return forUser(userId).select('captures', (q) => q
     .order('created_at', { ascending: false })
     .limit(COS_LIMITS.captures), {
     ...opts,
@@ -211,8 +218,8 @@ export async function readCaptures(opts = {}) {
   });
 }
 
-export async function readAgentRuns(opts = {}) {
-  return cosSelect('agent_runs', (q) => q
+export async function readAgentRuns({ userId, ...opts } = {}) {
+  return forUser(userId).select('agent_runs', (q) => q
     .order('created_at', { ascending: false })
     .limit(COS_LIMITS.agent_runs), {
     ...opts,
@@ -236,7 +243,7 @@ export async function readAgentRuns(opts = {}) {
  * did NOT look at — and how much of what it did not look at still needs the
  * owner.
  */
-export async function readEmailMessages({ now = new Date(), ...opts } = {}) {
+export async function readEmailMessages({ now = new Date(), userId, ...opts } = {}) {
   const since = new Date(now.getTime() - EMAIL_LOOKBACK_HOURS * 3600_000).toISOString();
   const settled = `(${SETTLED_ACTION_STATUS.join(',')})`;
   const eligible = [
@@ -247,7 +254,7 @@ export async function readEmailMessages({ now = new Date(), ...opts } = {}) {
 
   const narrow = (q) => q.not('action_status', 'in', settled).or(eligible);
 
-  const res = await cosSelect('email_messages', (q) => narrow(q)
+  const res = await forUser(userId).select('email_messages', (q) => narrow(q)
     .order('received_at', { ascending: false })
     .limit(EMAIL_CANDIDATE_POOL), {
     ...opts,
@@ -289,8 +296,8 @@ export async function readEmailMessages({ now = new Date(), ...opts } = {}) {
  * `dismissed` is the owner having explicitly rejected it. Surfacing a dismissed
  * suggestion in tomorrow's brief would be the system arguing with its owner.
  */
-export async function readEmailAnalyses(opts = {}) {
-  return cosSelect('email_ai_analyses', (q) => q
+export async function readEmailAnalyses({ userId, ...opts } = {}) {
+  return forUser(userId).select('email_ai_analyses', (q) => q
     .in('status', ['completed', 'accepted'])
     .order('created_at', { ascending: false })
     .limit(COS_LIMITS.email_ai_analyses), {
@@ -304,8 +311,8 @@ export async function readEmailAnalyses(opts = {}) {
  * exists for today, so a re-run is visible rather than producing a duplicate
  * row. This is a READ of today_briefs; the write lives in writer.js.
  */
-export async function readRecentBriefs({ limit = 5, ...opts } = {}) {
-  return cosSelect('today_briefs', (q) => q
+export async function readRecentBriefs({ limit = 5, userId, ...opts } = {}) {
+  return forUser(userId).select('today_briefs', (q) => q
     .order('generated_at', { ascending: false })
     .limit(limit), {
     ...opts,
@@ -325,8 +332,13 @@ export async function readRecentBriefs({ limit = 5, ...opts } = {}) {
  * The `tables` list matters: "the brief did not run" is not actionable, and
  * "the brief did not run because email_ai_analyses returned 42P01" is.
  */
-export async function gatherCosInput({ now = new Date(), env = process.env } = {}) {
-  const opts = { env };
+export async function gatherCosInput({ now = new Date(), env = process.env, userId } = {}) {
+  // Threaded, never defaulted. A default here would reintroduce exactly the
+  // singleton this session removed: every caller would silently gather the same
+  // person's data and the second user's brief would be composed from the
+  // first's records. forUser() throws on a missing id, so a caller that forgets
+  // fails loudly on the first read rather than quietly composing a wrong brief.
+  const opts = { env, userId };
   const [
     workstreams, openLoops, decisions, captures, agentRuns, emailMessages, emailAnalyses,
   ] = await Promise.all([

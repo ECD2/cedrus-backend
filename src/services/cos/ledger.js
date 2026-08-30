@@ -49,9 +49,72 @@ import { logger } from '../../utils/logger.js';
 
 export const LEDGER_KEY_PREFIX = 'cos_brief_send:';
 
-/** UTC calendar day. The brief is a once-per-day artifact, keyed by that day. */
-export function ledgerKey(now = new Date()) {
-  return LEDGER_KEY_PREFIX + now.toISOString().slice(0, 10);
+/**
+ * One claim per user per UTC day: `cos_brief_send:<user_id>:<YYYY-MM-DD>`.
+ *
+ * ── THE BUG THIS SHAPE FIXES (2026-08-30) ───────────────────────────────────
+ * This returned `cos_brief_send:<date>` — one claim per DAY, globally. With one
+ * owner that was correct. With two people the first brief composed claimed the
+ * day and the second was refused `already_sent`.
+ *
+ * What made it dangerous rather than merely wrong: the refusal travels the
+ * FAIL-CLOSED path, so in the logs it is byte-identical to correct duplicate
+ * prevention. Dad's brief would never arrive, every run would look healthy, and
+ * nothing anywhere would say otherwise. A silent stop is worse than a loud one.
+ *
+ * ── WHY userId IS REQUIRED, NOT DEFAULTED ───────────────────────────────────
+ * A default would re-create the global key under a new name: every caller that
+ * forgot to pass a user would share one slot again, and the same silent
+ * suppression would return. Throwing means a caller that forgets fails on its
+ * first tick, loudly, instead of quietly refusing to send someone's brief.
+ *
+ * The key survives logger.scrub() intact — a UUID and an ISO date are both
+ * masked before the phone pass (Bundle 39), so the key can be quoted in log
+ * lines without becoming `[phone:0830]`.
+ */
+export function ledgerKey({ userId, now = new Date() } = {}) {
+  if (typeof userId !== 'string' || userId.trim() === '') {
+    throw new Error(
+      'ledgerKey refused: a send claim requires an explicit user id. ' +
+      'A day-only key is one claim for everyone, and the second user is ' +
+      'silently refused as already_sent.');
+  }
+  return LEDGER_KEY_PREFIX + userId.trim() + ':' + now.toISOString().slice(0, 10);
+}
+
+/**
+ * Split a key back into its parts, so a log line can name the day without the
+ * uuid. `key.slice(LEDGER_KEY_PREFIX.length)` used to be the date; it is now
+ * `<user_id>:<date>`, and a message built from it would read as if the user id
+ * were the calendar day.
+ */
+export function ledgerKeyParts(key) {
+  const rest = String(key).slice(LEDGER_KEY_PREFIX.length);
+  const cut = rest.lastIndexOf(':');
+  if (cut === -1) return { userId: null, date: rest };
+  return { userId: rest.slice(0, cut), date: rest.slice(cut + 1) };
+}
+
+/**
+ * A claim may only be settled by the user who took it.
+ *
+ * markSent() and releaseClaim() receive the key that claimSend() returned
+ * rather than rebuilding it — the run may cross midnight between claiming and
+ * sending, and rebuilding from a fresh `now` would settle the wrong day. But
+ * taking the key as an opaque string means nothing checks that it is THIS
+ * user's key, so a threading mistake in the iterating job (Session B) would
+ * mark user A's day sent when user B's brief went out. This is that check.
+ */
+function assertKeyBelongsTo(key, userId, verb) {
+  if (typeof userId !== 'string' || userId.trim() === '') {
+    throw new Error(`${verb} refused: a ledger settlement requires an explicit user id.`);
+  }
+  const expected = LEDGER_KEY_PREFIX + userId.trim() + ':';
+  if (!String(key).startsWith(expected)) {
+    throw new Error(
+      `${verb} refused: ledger key '${key}' does not belong to the user settling it. ` +
+      'Settling another user\'s claim would mark their day sent for a brief they never received.');
+  }
 }
 
 /**
@@ -94,8 +157,8 @@ export function ledgerKey(now = new Date()) {
  * would otherwise never reach claimSend's own diagnostic and the cause would be
  * invisible (Lesson 1, Lesson 17).
  */
-export async function alreadySentToday({ now = new Date(), db = supabase } = {}) {
-  const key = ledgerKey(now);
+export async function alreadySentToday({ userId, now = new Date(), db = supabase } = {}) {
+  const key = ledgerKey({ userId, now });
   try {
     const { data, error } = await db
       .from('system_flags').select('value').eq('key', key).maybeSingle();
@@ -139,8 +202,8 @@ export async function alreadySentToday({ now = new Date(), db = supabase } = {})
  *   { claimed: false, reason: 'in_flight',      key }   — stuck 'claimed' row
  *   { claimed: false, reason: 'ledger_unreadable', key } — fail closed
  */
-export async function claimSend({ now = new Date(), db = supabase } = {}) {
-  const key = ledgerKey(now);
+export async function claimSend({ userId, now = new Date(), db = supabase } = {}) {
+  const key = ledgerKey({ userId, now });
 
   // Read first: gives a precise reason for the common "already done today"
   // case instead of a bare constraint violation.
@@ -175,7 +238,7 @@ export async function claimSend({ now = new Date(), db = supabase } = {}) {
   if (existing && existing.status === 'sent') {
     logger.event('cos.send.skipped', {
       outcome: 'already_sent',
-      message: `brief already sent for ${key.slice(LEDGER_KEY_PREFIX.length)} — not sending again`,
+      message: `brief already sent for ${ledgerKeyParts(key).date} — not sending again`,
     });
     return { claimed: false, reason: 'already_sent', key, sentAt: existing.sent_at || null };
   }
@@ -238,7 +301,8 @@ export async function claimSend({ now = new Date(), db = supabase } = {}) {
  * in 'claimed', which the next run refuses to send past. That is the safe
  * direction of ambiguity.
  */
-export async function markSent({ key, providerMessageId = null, provider = null, briefId = null, now = new Date(), db = supabase } = {}) {
+export async function markSent({ key, userId, providerMessageId = null, provider = null, briefId = null, now = new Date(), db = supabase } = {}) {
+  assertKeyBelongsTo(key, userId, 'markSent');
   const value = {
     status: 'sent',
     sent_at: now.toISOString(),
@@ -279,7 +343,8 @@ export async function markSent({ key, providerMessageId = null, provider = null,
  *
  * Only ever called when we KNOW nothing was transmitted.
  */
-export async function releaseClaim({ key, now = new Date(), db = supabase } = {}) {
+export async function releaseClaim({ key, userId, now = new Date(), db = supabase } = {}) {
+  assertKeyBelongsTo(key, userId, 'releaseClaim');
   try {
     const { error } = await db.from('system_flags').delete().eq('key', key);
     if (error) {
