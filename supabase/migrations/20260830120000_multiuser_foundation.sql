@@ -346,6 +346,94 @@ revoke all on user_capabilities from anon;
 revoke all on user_settings     from anon;
 revoke all on admin_audit       from anon;
 
+-- ── SELF-PROOF — the migration asserts its own post-conditions BEFORE commit ─
+--
+-- Added 2026-08-31. The post-check comments at the foot of this file describe
+-- eight claims a human is supposed to read. A claim nobody reads is not a
+-- check, and "no error appeared" is not a pass. These run inside the same
+-- transaction, so a failure rolls the ENTIRE migration back and leaves the
+-- database exactly as it was — there is no half-applied state to reason about.
+do $$
+declare n int;
+begin
+  select count(*) into n from information_schema.columns
+   where table_schema = 'public' and table_name = 'app_users'
+     and column_name in ('role','account_status','display_name',
+                         'invited_by','invited_at','activated_at');
+  if n <> 6 then raise exception 'ASSERT: expected 6 new app_users columns, found %', n; end if;
+
+  select count(*) into n from app_users
+   where role <> 'member' or account_status <> 'active';
+  if n <> 0 then raise exception 'ASSERT: % existing rows are not (member, active) — nobody may be granted admin by a migration', n; end if;
+
+  select count(*) into n from pg_class
+   where relname in ('user_capabilities','user_settings','admin_audit')
+     and relrowsecurity and relforcerowsecurity;
+  if n <> 3 then raise exception 'ASSERT: expected 3 tables with RLS enabled AND forced, found %', n; end if;
+
+  -- The one that matters most: the publishable key is public and ships in the
+  -- client bundle, so a policy naming anon or public is a table anyone can read.
+  select count(*) into n from pg_policies
+   where tablename in ('user_capabilities','user_settings','admin_audit')
+     and ('anon' = any (roles) or 'public' = any (roles));
+  if n <> 0 then raise exception 'ASSERT: % policies expose anon/public', n; end if;
+
+  select count(*) into n from pg_policies
+   where tablename in ('user_capabilities','user_settings','admin_audit');
+  if n <> 6 then raise exception 'ASSERT: expected 6 policies, found %', n; end if;
+
+  select (select count(*) from user_settings) + (select count(*) from user_capabilities) into n;
+  if n <> 0 then raise exception 'ASSERT: % settings/capability rows exist; this migration creates none', n; end if;
+end $$;
+
+-- CONTROL 1 — the closed vocabulary really rejects a typo, and really accepts a
+-- valid name. Only the pair discriminates: a constraint that rejects everything
+-- would pass the negative half alone and break provisioning in Session D.
+do $$
+declare uid uuid; rejected boolean := false;
+begin
+  select id into uid from app_users limit 1;
+  if uid is null then raise exception 'ASSERT: no app_users row exists to run the controls against'; end if;
+  begin
+    insert into user_capabilities (user_id, capability) values (uid, 'run_agent');
+  exception when check_violation then rejected := true;
+  end;
+  if not rejected then raise exception 'CONTROL: user_capabilities accepted the invalid capability run_agent'; end if;
+  begin
+    insert into user_capabilities (user_id, capability) values (uid, 'run_agents');
+  exception when others then
+    raise exception 'CONTROL: a VALID capability was rejected (%) — the constraint refuses everything', sqlerrm;
+  end;
+  delete from user_capabilities where user_id = uid and capability = 'run_agents';
+end $$;
+
+-- CONTROL 2 — admin_audit refuses UPDATE and DELETE, each proven SEPARATELY.
+-- Postgres aborts a whole transaction on the first error, so testing both in
+-- one block would show one real refusal and one 25P02; each therefore runs in
+-- its own PL/pgSQL subtransaction. The inserted control row is unwound by
+-- raising a sentinel, since the trigger makes deleting it impossible by design.
+do $$
+declare uid uuid; u_blocked boolean := false; d_blocked boolean := false;
+begin
+  select id into uid from app_users limit 1;
+  begin
+    insert into admin_audit (actor_user_id, action) values (uid, 'append_only_control');
+    begin
+      update admin_audit set action = 'tampered' where action = 'append_only_control';
+    exception when others then u_blocked := true;
+    end;
+    begin
+      delete from admin_audit where action = 'append_only_control';
+    exception when others then d_blocked := true;
+    end;
+    raise exception 'UNWIND_CONTROL_ROW';
+  exception when others then
+    if sqlerrm <> 'UNWIND_CONTROL_ROW' then raise; end if;
+  end;
+  if not u_blocked then raise exception 'CONTROL: admin_audit accepted an UPDATE — the append-only trigger does not fire'; end if;
+  if not d_blocked then raise exception 'CONTROL: admin_audit accepted a DELETE — the append-only trigger does not fire'; end if;
+end $$;
+
 commit;
 
 -- ── POST-CHECK — run this AFTER applying, and keep the output ───────────────
