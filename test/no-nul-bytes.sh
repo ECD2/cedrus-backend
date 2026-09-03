@@ -91,12 +91,29 @@ if [ "$failures" -ne 0 ]; then
   exit 1
 fi
 
+# Path-EXACT allowlist membership: exit 0 iff "$1" equals one whole entry.
+# This was `case "$ALLOWLIST" in *"$f"*)` until 2026-09-03 — a SUBSTRING test
+# against the concatenated list, so any tracked path that happened to be a
+# substring of an entry (a `travel.png` at the repo root, or `v8/travel.png`)
+# was silently exempted and never scanned. Proven with a NUL-bearing
+# `travel.png` at the root: the old matcher passed green at 489 scanned; this
+# one flags it at 490. Iterate the entries one per line and compare whole
+# strings — never glob against the joined list.
+is_allowlisted() {
+  while IFS= read -r entry; do
+    [ "$1" = "$entry" ] && return 0
+  done <<ENTRIES
+$ALLOWLIST
+ENTRIES
+  return 1
+}
+
 # ── the real scan ───────────────────────────────────────────────────────────
 scanned=0
 dirty=""
 for f in $(git ls-files); do
   [ -f "$f" ] || continue
-  case "$ALLOWLIST" in *"$f"*) continue;; esac
+  if is_allowlisted "$f"; then continue; fi
   scanned=$((scanned+1))
   if has_nul "$f"; then dirty="$dirty $f"; fi
 done

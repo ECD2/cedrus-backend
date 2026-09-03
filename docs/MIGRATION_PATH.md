@@ -160,5 +160,10 @@ not found), so nothing in this document was executed. Specifically:
   **not** confirmed against `supabase migration list --linked`. If the real
   list differs, the repair commands must be regenerated from it rather than
   from this file.
-- The migration SQL has **not** been run against any database, local or remote.
-  It is syntax-reviewed by hand only.
+- The migration SQL **was applied to production on 2026-08-31 and verified by
+  read-back** — recorded in commit `b22d5cf`, and the same day's bootstrap
+  admin promotion (CEDRUS.md II.5) ran against the columns it added. It has
+  still never been run against a local database (no local stack exists yet;
+  see `scripts/local-dev-supabase.sh`). Until 2026-09-03 this line said the
+  SQL "has not been run against any database, local or remote" — true when
+  written on 2026-08-30, false from 2026-08-31 on.
