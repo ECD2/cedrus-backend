@@ -983,6 +983,79 @@ section('the writeback row — a contract with CoS\'s own persist()');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+section('the owner-source label — the writeback announces the CALLER\'s provenance, never an invented one');
+{
+  const writer = await import('../src/services/cos/writer.js');
+
+  // The production shape today: COS_USER_ID set, NO user_settings row (nothing
+  // in src/ reads that table). The job resolves 'env' and hands the id AND that
+  // source down. The label must say env — not settings.
+  const viaEnv = await writer.resolveCosUserId({ env: { COS_USER_ID: OWNER }, cosUserId: OWNER, cosUserSource: 'env' });
+  ok('COS_USER_ID set, no user_settings row: the label is env', viaEnv.source === 'env', viaEnv);
+  ok('COS_USER_ID set, no user_settings row: the label is NOT settings', viaEnv.source !== 'settings', viaEnv);
+
+  // CONTROL, and it discriminates: a caller that genuinely read
+  // user_settings.cos_user_id says so, and the label follows the caller. THAT
+  // PATH DOES NOT EXIST YET — nothing reads user_settings until P1.4
+  // (docs/BUILD_PLAN.md) — so this asserts only that the label is whatever the
+  // caller declared. The settings case is UNEXERCISED end to end until P1.4.
+  const viaSettings = await writer.resolveCosUserId({ env: {}, cosUserId: OWNER, cosUserSource: 'settings' });
+  ok('CONTROL: a caller declaring settings is labelled settings (settings path unexercised until P1.4)',
+    viaSettings.source === 'settings', viaSettings);
+
+  // A caller that names an id but declares no source is "a caller told me" and
+  // nothing more. The old code labelled exactly this 'settings'.
+  const undeclared = await writer.resolveCosUserId({ env: {}, cosUserId: OWNER });
+  ok('a caller-supplied id with no declared source is labelled caller', undeclared.source === 'caller', undeclared);
+  ok('...and never settings', undeclared.source !== 'settings', undeclared);
+
+  // The env path itself is unchanged: nobody named a user, COS_USER_ID set.
+  const envOnly = await writer.resolveCosUserId({ env: { COS_USER_ID: OWNER } });
+  ok('no caller id, COS_USER_ID set: userId from env, source env', envOnly.userId === OWNER && envOnly.source === 'env', envOnly);
+
+  // End to end through the REAL job: it resolves the owner from COS_USER_ID
+  // and must carry THAT source into the writeback rather than dropping it.
+  reset();
+  {
+    const { deps, written } = makeDeps({ brief: briefCiting([{ type: 'open_loop', id: IDS.loop }]) });
+    const r = await runCosDailyBrief({ env: ARMED_ENV, now: new Date('2026-08-17T11:00:00Z'), deps });
+    ok('live run: the job hands the writeback the id it resolved',
+      r.ran === true && written.length === 1 && written[0].cosUserId === OWNER, written[0] && written[0].cosUserId);
+    ok('live run: the job hands the writeback its OWN resolved source (env)',
+      written.length === 1 && written[0].cosUserSource === 'env', written[0] && written[0].cosUserSource);
+  }
+  reset();
+  {
+    const { deps, written } = makeDeps({ brief: briefCiting([{ type: 'open_loop', id: IDS.loop }]) });
+    const r = await runCosDailyBrief({ env: { ...ARMED_ENV, COS_BRIEF_WRITEBACK_ONLY: 'true' }, now: new Date('2026-08-17T11:00:00Z'), deps });
+    ok('writeback-only run: the source travels too (env)',
+      r.ran === true && written.length === 1 && written[0].cosUserSource === 'env', written[0] && written[0].cosUserSource);
+  }
+  reset();
+
+  // And the LOG LINE — the thing a human reads. The insert seam lets the real
+  // writeBriefToCos reach its announcement without a CoS project.
+  const input = compose.enforceTotalSize(compose.minimizeInput(rawData(), Date.parse('2026-08-17T11:00:00Z')));
+  const v = compose.validateBrief(briefCiting([{ type: 'open_loop', id: IDS.loop }]), input);
+  const writeArgs = (over) => ({
+    brief: v.brief, minimizedInput: input, model: 'gpt-4.1-mini', latencyMs: 100, tokens: 150,
+    env: ARMED_ENV, now: new Date('2026-08-17T11:00:00Z'), cosUserId: OWNER,
+    deps: { insert: async () => ({ id: 'cos-brief-x', error: null, disarmed: false }) },
+    ...over,
+  });
+  const envEvents = await captureLogs(() => writer.writeBriefToCos(writeArgs({ cosUserSource: 'env' })));
+  const envLine = eventNamed(envEvents, 'cos.brief.written');
+  ok('cos.brief.written reports "owner id source: env" today',
+    !!envLine && /owner id source: env\)/.test(envLine.message), envLine && envLine.message);
+  ok('cos.brief.written does NOT say settings today',
+    !!envLine && !/settings/.test(envLine.message), envLine && envLine.message);
+  const setEvents = await captureLogs(() => writer.writeBriefToCos(writeArgs({ cosUserSource: 'settings' })));
+  const setLine = eventNamed(setEvents, 'cos.brief.written');
+  ok('CONTROL: a caller declaring settings is announced as settings (unexercised until P1.4)',
+    !!setLine && /owner id source: settings\)/.test(setLine.message), setLine && setLine.message);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 section('the ledger blocks a double send');
 {
   reset();

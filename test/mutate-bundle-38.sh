@@ -18,7 +18,7 @@ MISSED=0
 # rather than assumed.
 # Every file this script mutates. The restore trap iterates this list, so a
 # file added to a mutate() call below must be added here too.
-MUTATED_FILES="src/jobs/cosDailyBrief.js src/jobs/scheduler.js src/services/cos/client.js src/services/cos/compose.js src/services/cos/ledger.js src/services/cos/reader.js src/services/cos/renderer.js src/services/cos/resendTransport.js src/utils/logger.js"
+MUTATED_FILES="src/jobs/cosDailyBrief.js src/jobs/scheduler.js src/services/cos/client.js src/services/cos/compose.js src/services/cos/ledger.js src/services/cos/reader.js src/services/cos/renderer.js src/services/cos/resendTransport.js src/services/cos/writer.js src/utils/logger.js"
 
 mksums() {
   out=$(mktemp)
@@ -28,6 +28,7 @@ mksums() {
     src/services/cos/ledger.js src/services/cos/reader.js \
     src/services/cos/renderer.js \
     src/services/cos/resendTransport.js \
+    src/services/cos/writer.js \
     src/utils/logger.js > "$out"
   echo "$out"
 }
@@ -376,6 +377,36 @@ mutate "the recorder counts no events, making the empty result vacuous" \
   src/utils/logger.js \
   "    dropRecorderSeen++;" \
   "    dropRecorderSeen += 0;"
+
+# ── the owner-source label (2026-09-04) ─────────────────────────────────────
+# From 2026-08-30 to 2026-09-04 the caller-supplied branch returned
+# source:'settings' for ANY id while nothing in src/ reads user_settings, so
+# every cos.brief.written line claimed a provenance the system had not earned.
+# The first mutation restores that exact line; the rest break the hand-off.
+mutate "writer relabels every caller-supplied id 'settings' (the 2026-08-30 bug, restored)" \
+  src/services/cos/writer.js \
+  "    return { userId: cosUserId.trim(), source: declared };" \
+  "    return { userId: cosUserId.trim(), source: 'settings' };"
+mutate "writer drops the caller's declared source on the way into resolveCosUserId" \
+  src/services/cos/writer.js \
+  "  const { userId, source } = await resolveCosUserId({ env, cosUserId, cosUserSource });" \
+  "  const { userId, source } = await resolveCosUserId({ env, cosUserId });"
+mutate "the job throws its own resolved source away on the live writeback" \
+  src/jobs/cosDailyBrief.js \
+  "  const written = await write({
+    brief, minimizedInput: minimized, model: result.model || model,
+    latencyMs, tokens: totalTokens(result.usage), env, now, cosUserId: userId, cosUserSource: owner.source," \
+  "  const written = await write({
+    brief, minimizedInput: minimized, model: result.model || model,
+    latencyMs, tokens: totalTokens(result.usage), env, now, cosUserId: userId,"
+mutate "the job throws its own resolved source away on the writeback-only path" \
+  src/jobs/cosDailyBrief.js \
+  "    const wroteOnly = await write({
+      brief, minimizedInput: minimized, model: result.model || model,
+      latencyMs, tokens: totalTokens(result.usage), env, now, cosUserId: userId, cosUserSource: owner.source," \
+  "    const wroteOnly = await write({
+      brief, minimizedInput: minimized, model: result.model || model,
+      latencyMs, tokens: totalTokens(result.usage), env, now, cosUserId: userId,"
 
 echo ""
 echo "=== RESULT: $PASSED guards proven live, $MISSED missed ==="

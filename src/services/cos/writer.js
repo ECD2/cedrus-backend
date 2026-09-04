@@ -79,10 +79,19 @@ export function resetCosUserId() { cachedUserIds.clear(); }
  * Whose brief this is.
  *
  * Preference order, and why:
- *   1. `cosUserId` — this person's own CoS user id, read from
- *      user_settings.cos_user_id by the caller. THE MULTI-USER PATH. When a
- *      user is named, this returns their id and nothing else is consulted:
- *      no env var, no cache, no derivation.
+ *   1. `cosUserId` — an id THE CALLER already resolved. When a user is named,
+ *      this returns that id and nothing else is consulted: no env var, no
+ *      cache, no derivation. The label for this branch is whatever the caller
+ *      declared in `cosUserSource` (the job passes its own resolved source,
+ *      'env' today) and 'caller' when it declared nothing. It is NEVER
+ *      'settings' on this module's say-so. Until 2026-09-04 this branch
+ *      returned source:'settings' for ANY supplied id, before looking at
+ *      anything, while nothing in src/ reads the user_settings table — so
+ *      every cos.brief.written line from 2026-08-30 claimed a provenance the
+ *      system had not earned, inside a function whose own comment says the
+ *      log must not blur levels of confidence. 'settings' will appear only
+ *      when a caller genuinely reads user_settings.cos_user_id and says so
+ *      (P1.4, docs/BUILD_PLAN.md).
  *   2. COS_USER_ID — the single-owner deploy. Still supported because it is
  *      what production runs on today, and Session B is what replaces it.
  *   3. The newest today_briefs row's user_id — a BOOTSTRAP convenience so
@@ -103,9 +112,12 @@ export function resetCosUserId() { cachedUserIds.clear(); }
  * Which path was used is ANNOUNCED, because "derived it" and "was told it" are
  * different levels of confidence and the log should not blur them.
  */
-export async function resolveCosUserId({ env = process.env, cosUserId = null } = {}) {
+export async function resolveCosUserId({ env = process.env, cosUserId = null, cosUserSource = null } = {}) {
   if (typeof cosUserId === 'string' && cosUserId.trim() !== '') {
-    return { userId: cosUserId.trim(), source: 'settings' };
+    // "A caller told me." Carry the caller's own resolved source through; do
+    // not invent one. This line used to read source: 'settings' (see header).
+    const declared = typeof cosUserSource === 'string' && cosUserSource.trim() !== '' ? cosUserSource.trim() : 'caller';
+    return { userId: cosUserId.trim(), source: declared };
   }
 
   const explicit = (env.COS_USER_ID || '').trim();
@@ -197,18 +209,23 @@ export function buildBriefRow({ userId, brief, minimizedInput, model, latencyMs,
  * is the delivery, the row is the mirror. The caller reports both outcomes
  * separately so "you got the brief but the app won't show it" is legible
  * rather than being flattened into one word.
+ *
+ * `cosUserSource` is the caller's own resolved source for `cosUserId`, and it
+ * is what the cos.brief.written line announces. `deps.insert` is a test seam
+ * so the announcement can be driven without a CoS project.
  */
 export async function writeBriefToCos({
   brief, minimizedInput, model, latencyMs, tokens = null, env = process.env, now = new Date(),
-  cosUserId = null,
+  cosUserId = null, cosUserSource = null, deps = {},
 }) {
-  const { userId, source } = await resolveCosUserId({ env, cosUserId });
+  const { insert = cosInsertTodayBrief } = deps;
+  const { userId, source } = await resolveCosUserId({ env, cosUserId, cosUserSource });
   if (!userId) {
     return { id: null, skipped: true, reason: source === 'disarmed' ? 'disarmed' : 'no_user_id' };
   }
 
   const row = buildBriefRow({ userId, brief, minimizedInput, model, latencyMs, tokens, now });
-  const { id, error, disarmed } = await cosInsertTodayBrief(row, { env });
+  const { id, error, disarmed } = await insert(row, { env });
   if (disarmed) return { id: null, skipped: true, reason: 'disarmed' };
   if (error) return { id: null, skipped: true, reason: 'write_failed' };
 

@@ -362,7 +362,7 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
   if (writebackOnly) {
     const wroteOnly = await write({
       brief, minimizedInput: minimized, model: result.model || model,
-      latencyMs, tokens: totalTokens(result.usage), env, now, cosUserId: userId,
+      latencyMs, tokens: totalTokens(result.usage), env, now, cosUserId: userId, cosUserSource: owner.source,
     });
     if (wroteOnly.skipped) {
       logger.event('cos.brief.writeback_only', {
@@ -441,9 +441,11 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
   }
 
   // ── writeback: the CoS app shows the same brief ───────────────────────────
+  // The source travels WITH the id. Before 2026-09-04 only the id went down
+  // and the writer relabelled it 'settings' — see writer.js resolveCosUserId.
   const written = await write({
     brief, minimizedInput: minimized, model: result.model || model,
-    latencyMs, tokens: totalTokens(result.usage), env, now, cosUserId: userId,
+    latencyMs, tokens: totalTokens(result.usage), env, now, cosUserId: userId, cosUserSource: owner.source,
   });
 
   return {
