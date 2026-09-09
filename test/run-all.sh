@@ -168,6 +168,11 @@ echo "=== Bundle 44 — backfill through the provisioning path (P1.3): one code 
 bun test/normalize-account.test.mjs
 
 echo ""
+echo "=== Bundle 48 — isolation proofs A2, A5, A10 (P1.5): cross-user writes refused, anon reads nothing, no id crosses a log trace ==="
+# bun explicitly, not $RUNNER: top-level await + dynamic import, PGlite again.
+bun test/isolation-proofs.test.mjs
+
+echo ""
 echo "=== CoS reader/schema conformance ==="
 # The ONLY stage that can catch a reader/schema mismatch. Every other suite
 # passes happily while one exists, because the reader, the composer and the
