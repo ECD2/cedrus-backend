@@ -23,11 +23,31 @@
 //           → EITHER cos.brief.skipped_precheck        (a valid, complete answer)
 //             OR     cos.compose.ok → cos.send.ok → cos.brief.written
 //
-// Other events may be interleaved and are not errors — cos.owner.derived sits
-// between cos.send.ok and cos.brief.written on every real run in the dumps.
-// The check is on the RELATIVE ORDER of the required events, not on adjacency,
-// because pinning adjacency would make the verifier fail the moment the job
-// logs one more line.
+// Other events may be interleaved and are not errors. cos.owner.derived sat
+// between cos.send.ok and cos.brief.written on every August 2026 run and has
+// not fired since COS_USER_ID was set on 2026-08-30 (II.5) — a verifier that
+// expected it on every run would be calibrated against a pre-08-30 dump. The
+// programs.today.* events (2757813, 2026-09-09) sit between cos.email.truncated
+// and cos.compose.ok. The check is on the RELATIVE ORDER of the required
+// events, not on adjacency, because pinning adjacency would make the verifier
+// fail the moment the job logs one more line.
+//
+// ── what it reads beyond the sequence (2026-09-09) ───────────────────────
+//
+// Three facts the job now logs, reported without changing the sequence or the
+// exit codes above. Every dump that predates them simply lacks the lines, and
+// absence is reported as absence, never as an error.
+//
+//   cos.brief.aborted     the job's own fail-closed stop. Its structured
+//                         fields are error_category, outcome="fail_closed" and
+//                         (program_items branch only) error_code — there is NO
+//                         `reason` key on this line. The table names are in
+//                         the message and nowhere else. When a broken run
+//                         carries one, it is the FIRST line of the RESULT.
+//   cos.brief.written     "(owner id source: X)" — prose-only; the line's
+//                         only structured field is outcome="ok".
+//   programs.today.read   count=N reason=<owner source>, both structured;
+//   programs.today.skipped                     outcome="no_app_user".
 //
 // ── exit codes ───────────────────────────────────────────────────────────
 //
@@ -264,6 +284,117 @@ export function truncation(runLines) {
 
 const num = (v) => (v === undefined || v === null || v === '' ? null : Number(v));
 
+/**
+ * The job's fail-closed stop, if this run took it.
+ *
+ * `cos.brief.aborted` has three emit sites in src/jobs/cosDailyBrief.js and
+ * NONE of them passes a `reason` field. What the line carries structurally is
+ * `error_category` ("config" for an unresolved owner, "db_error" for an
+ * unreadable table), `outcome="fail_closed"`, and — on the program_items
+ * branch only — `error_code`. The table names are in the MESSAGE and nowhere
+ * else: a table name is free-form text, which the logger allowlist keeps out
+ * of structured fields on purpose. So the reason comes from the fields and
+ * the tables from the prose, matched in the three shapes the job writes:
+ *
+ *   "CoS tables unreadable (a, b) — …"                      → tables a, b
+ *   "program_items unreadable (CODE: detail) — …"           → table program_items
+ *   "cannot determine whose brief to compose (SOURCE) — …"  → no table; the owner source
+ *
+ * The program_items parenthetical is an ERROR, not a table list — splitting
+ * it on commas would report "42883: function todays_program_items(uuid" as a
+ * table — so that branch names the table from the word before "unreadable"
+ * and leaves the parenthetical to the error_code field and the errors section.
+ * A message in none of these shapes is reported as its first clause, unparsed,
+ * rather than silently as "no table": a shape this code does not know is a
+ * fact the reader needs, not one to smooth over.
+ */
+export function abortedRun(runLines) {
+  const l = first(runLines, 'cos.brief.aborted');
+  if (!l) return null;
+  const msg = l.message || '';
+  let m;
+  let cause;
+  let tables = [];
+  let ownerSource = null;
+  let parsed = true;
+  if ((m = /^CoS tables unreadable \(([^)]*)\)/.exec(msg))) {
+    cause = 'CoS tables unreadable';
+    tables = m[1].split(',').map((s) => s.trim()).filter(Boolean);
+  } else if ((m = /^(\S+) unreadable \(/.exec(msg))) {
+    cause = 'table unreadable';
+    tables = [m[1]];
+  } else if ((m = /^cannot determine whose brief to compose \(([^)]*)\)/.exec(msg))) {
+    cause = 'no owner id — refused to read CoS unscoped';
+    ownerSource = m[1];
+  } else {
+    cause = msg ? msg.split(' — ')[0] : '(no message)';
+    parsed = false;
+  }
+  return {
+    errorCategory: l.fields.error_category || null,
+    outcome: l.fields.outcome || null,
+    errorCode: l.fields.error_code || null,
+    cause,
+    tables,
+    ownerSource,
+    parsed,
+    timestamp: l.fields.timestamp || null,
+  };
+}
+
+/**
+ * Whose id the writeback used, as the written line itself declares it.
+ *
+ * PROSE-ONLY. writer.js emits
+ *   "brief written back to CoS today_briefs (owner id source: X)"
+ * with outcome="ok" as its only structured field, so the message is all there
+ * is to read. Labels seen in real dumps: derived and derived-cached (August
+ * 2026, COS_USER_ID unset) and settings (2026-08-30 → 2026-09-04). That last
+ * one was FALSE on every line it appeared on — writer.js stamped 'settings' on
+ * any caller-supplied id until 9e9a91d (2026-09-04), and nothing reads
+ * user_settings until P1.4 (II.5). The verifier repeats the label and says
+ * so; it does not decide for the reader which builds to believe.
+ */
+export function ownerSource(runLines) {
+  const l = first(runLines, 'cos.brief.written');
+  if (!l) return null;
+  const m = /owner id source:\s*([^)\s]+)\)/.exec(l.message || '');
+  return { source: m ? m[1] : null, stated: Boolean(m) };
+}
+
+/**
+ * The today's-program block (2757813, 2026-09-09): did the run read it, and
+ * how many items did today hold?
+ *
+ * Both numbers are STRUCTURED. `count` and `reason` were already in the
+ * logger allowlist when the event was written, so — unlike cos.email.truncated
+ * — the line carries them as fields and no prose fallback exists here. `count`
+ * is the number of program_items rows returned for today; `reason` is the
+ * owner-id source the block resolved ('settings' or 'env'), which is a
+ * DIFFERENT lookup from the one on cos.brief.written and can disagree with it.
+ *
+ * Three shapes, the third being absence:
+ *   programs.today.read     outcome=items|none  count=N  reason=<source>
+ *   programs.today.skipped  outcome=no_app_user   (the brief continues without the block)
+ *   (nothing)               every build before 2757813, or a run that stopped earlier
+ */
+export function programsBlock(runLines) {
+  const read = first(runLines, 'programs.today.read');
+  if (read) {
+    return {
+      event: 'programs.today.read',
+      outcome: read.fields.outcome || null,
+      count: num(read.fields.count),
+      ownerSource: read.fields.reason || null,
+    };
+  }
+  const skipped = first(runLines, 'programs.today.skipped');
+  if (skipped) {
+    return { event: 'programs.today.skipped', outcome: skipped.fields.outcome || null, count: null, ownerSource: null };
+  }
+  return null;
+}
+
 export function summarize(run) {
   const L = run.lines;
   const mode = first(L, 'cos.mode');
@@ -272,9 +403,13 @@ export function summarize(run) {
   const send = first(L, 'cos.send.ok');
   const written = first(L, 'cos.brief.written');
   const skipped = first(L, 'cos.brief.skipped_precheck');
+  const abortedLine = first(L, 'cos.brief.aborted');
 
   const startTs = mode && !Number.isNaN(mode.ts) ? mode.ts : null;
-  const endLine = written || skipped || send || compose;
+  // An abort is a terminal line like a writeback or a precheck skip: the run
+  // ended there, so the wall time runs to it. send/compose remain the
+  // fallbacks for a run that broke without saying why.
+  const endLine = written || skipped || abortedLine || send || compose;
   const endTs = endLine && !Number.isNaN(endLine.ts) ? endLine.ts : null;
 
   return {
@@ -298,6 +433,11 @@ export function summarize(run) {
     sent: Boolean(send),
     sendLatencyMs: send ? num(send.fields.latency_ms) : null,
     precheckOutcome: skipped ? (skipped.fields.outcome || null) : null,
+    // The three September facts. Each is null when its line is absent, and
+    // absent is the normal state of every dump written before 2026-09-09.
+    aborted: abortedRun(L),
+    written: ownerSource(L),
+    programs: programsBlock(L),
     startedAt: mode ? mode.fields.timestamp || null : null,
     endedAt: endLine ? endLine.fields.timestamp || null : null,
     endedOn: endLine ? endLine.event : null,
@@ -369,6 +509,21 @@ export function report(text, out = console.log) {
     out(`                [numbers read from ${tr.source}]`);
   }
 
+  // The programs block sits here in the job's own order: after the gather and
+  // its truncation notice, before the model is paid.
+  const pb = s.programs;
+  if (!pb) {
+    out('programs        (no programs.today.* line on this run — expected on any build before 2757813,');
+    out('                or a run that stopped earlier; not an error)');
+  } else if (pb.event === 'programs.today.skipped') {
+    out(`programs        block skipped — ${pb.outcome || '?'}  (programs.today.skipped; the brief continued without it)`);
+  } else {
+    const n = pb.count === null ? '? (no count on this line)' : pb.count;
+    out(pb.count === 0
+      ? `programs        no items today  (programs.today.read count=0, owner id source: ${pb.ownerSource || '?'})`
+      : `programs        ${n} item(s) today  (programs.today.read, block: ${pb.outcome || '?'}, owner id source: ${pb.ownerSource || '?'})`);
+  }
+
   if (s.precheckOutcome) {
     out(`precheck        SKIPPED — ${s.precheckOutcome}`);
     out('                the day was already dealt with, so nothing was gathered,');
@@ -389,6 +544,20 @@ export function report(text, out = console.log) {
     out('send            (no cos.send.ok line)');
   }
 
+  if (s.written) {
+    if (!s.written.stated) {
+      out('written         ok — owner id source not stated on this line');
+    } else {
+      out(`written         ok — owner id source: ${s.written.source}`);
+      if (s.written.source === 'settings') {
+        out('                [the label as the job printed it; until 9e9a91d (2026-09-04) it was stamped');
+        out('                on any caller-supplied id, and nothing reads user_settings before P1.4 — II.5]');
+      }
+    }
+  } else if (!s.precheckOutcome) {
+    out('written         (no cos.brief.written line)');
+  }
+
   out(`wall time       ${fmtMs(s.wallMs)}${s.endedOn ? `  (cos.mode → ${s.endedOn})` : ''}`);
   out('');
 
@@ -396,6 +565,16 @@ export function report(text, out = console.log) {
     out(seq.outcome === 'precheck_skip'
       ? 'RESULT: complete — precheck skip (nothing was owed today)'
       : 'RESULT: complete run');
+  } else if (s.aborted) {
+    // The job stopped ITSELF, and said why. That is the first thing the
+    // reader needs — the missing step is a consequence of it, not the cause,
+    // so it comes second. The exit code is unchanged: the brief did not
+    // complete, and 1 is what that has always meant.
+    out(`RESULT: BROKEN SEQUENCE — ${fmtAborted(s.aborted)}`);
+    out(`        missing step: ${seq.missing} — the job stopped itself at cos.brief.aborted; read that line first`);
+    out('');
+    out('  events seen, in order:');
+    for (const l of run.lines) if (l.event) out(`    ${l.event}`);
   } else {
     out(`RESULT: BROKEN SEQUENCE — missing step: ${seq.missing}`);
     out('');
@@ -405,6 +584,25 @@ export function report(text, out = console.log) {
 
   reportErrors(errs, out);
   return seq.ok ? 0 : 1;
+}
+
+/**
+ * One line: what the abort line carries, in the field names it carries it
+ * under, then the table(s) it names. Field names are printed literally
+ * (error_category=…, not "reason: …") so nothing here claims a key the line
+ * does not have.
+ */
+function fmtAborted(a) {
+  const fields = [
+    `error_category=${a.errorCategory || '(none)'}`,
+    a.outcome ? `outcome=${a.outcome}` : null,
+    a.errorCode ? `error_code=${a.errorCode}` : null,
+  ].filter(Boolean).join(' ');
+  let what;
+  if (a.tables.length) what = `${a.cause}: ${a.tables.join(', ')}`;
+  else if (a.ownerSource) what = `${a.cause} (owner source: ${a.ownerSource}); no table named`;
+  else what = `${a.cause}; no table named${a.parsed ? '' : ' (message shape not recognised — read the errors section)'}`;
+  return `ABORTED (cos.brief.aborted) — ${fields} — ${what}`;
 }
 
 function reportErrors(errs, out) {

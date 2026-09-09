@@ -11,6 +11,12 @@ bun.lockb
 supabase/.temp/
 supabase/.branches/
 
+# Python bytecode, anywhere. The apply/backfill scripts under scripts/ are the
+# only Python here so far, but the pattern is deliberately not scoped to them:
+# a .pyc carries NUL bytes, and test/no-nul-bytes.sh fails the battery on any
+# tracked file that does.
+__pycache__/
+
 # node_modules as a SYMLINK (worktrees link to the main checkout). The bare
 # "node_modules/" pattern above matches a DIRECTORY only, so a symlink of that
 # name was committable — and committing one replaced the real directory with a
