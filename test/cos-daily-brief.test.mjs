@@ -195,6 +195,12 @@ function makeDeps({ data = rawData(), brief = null, db = fakeDb(), modelThrows =
     release: (a) => ledger.releaseClaim({ ...a, db }),
     write: async (a) => { written.push(a); return { id: 'cos-brief-1', skipped: false, reason: null }; },
     logRun: async () => {},
+    // The today's-program block (R6.2a) resolves its owner through the real
+    // Cedrus client by default — user_settings.cos_user_id — which here would
+    // reach http://supabase.invalid and burn ~7s per run, the same trap
+    // precheck above avoids. This bundle is about the CoS side; the program
+    // side is Bundle 43's, where it runs REAL against PGlite.
+    programOwner: async () => ({ appUserId: null, source: 'test' }),
   };
   return { deps, written, db };
 }

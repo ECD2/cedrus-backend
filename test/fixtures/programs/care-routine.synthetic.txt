@@ -1,0 +1,14 @@
+# SYNTHETIC care routine for proving scripts/load-program.mjs. NOT the real routine.
+# Dateless on purpose: the load script materialises it from --start over a horizon.
+title: Care routine (synthetic)
+kind: routine
+time_zone: America/New_York
+description: Synthetic weekly care pattern; open-ended.
+
+# weekday(s) | category  | title              | start | minutes | instructions
+daily        | face      | Morning face       | 07:00 | 5       | cleanse, moisturise, SPF
+daily        | face      | Evening face       | 22:00 | 5       | cleanse, retinoid on mon/thu, moisturise
+mon,thu      | shampoo   | Wash               | 07:10 | 10      | lukewarm water; scalp only
+mon,thu      | condition | Condition          | 07:20 | 5       | mid-length to ends; rinse cool
+sun          | oil       | Scalp oil          | 20:00 | 30      | apply, leave 30 min, wash out
+wed,sat      | body      | Body care          | 21:30 | 15      | exfoliate wed, moisturise both

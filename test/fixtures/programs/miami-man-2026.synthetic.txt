@@ -1,0 +1,88 @@
+# SYNTHETIC training plan for proving scripts/load-program.mjs. NOT the real Miami Man 2026 plan.
+# The real source does not exist yet as a file; when it does, its dates win over anything written here.
+title: Miami Man 2026 (synthetic)
+kind: training
+time_zone: America/New_York
+start: 2026-09-08
+end: 2026-11-15
+description: Synthetic ten-week build. One item per day, rest days included, so rows equal days.
+
+# date       | category    | title                   | start | minutes | instructions
+2026-09-08 | bike        | Trainer intervals       | 06:15 | 60      | 10 min easy; 4x8 min at threshold, 3 min easy; 10 min spin down
+2026-09-09 | run         | Easy run + strides      | 06:30 | 40      | Conversational pace; finish with 6x20s strides
+2026-09-10 | lift        | Strength: legs + core   | 07:00 | 45      | Squat 3x8, RDL 3x8, split squat 3x10/leg, plank 3x45s
+2026-09-11 | rest        | Rest                    | -     | -       | Full rest; mobility 10 min if stiff
+2026-09-12 | brick       | Brick: bike to run      | 07:00 | 90      | 60 min ride at race effort, transition, 30 min run at goal pace
+2026-09-13 | open_water  | Open water swim         | 07:30 | 50      | Sight every 6 strokes; two 800m loops with a beach exit between
+# week 1
+2026-09-14 | swim        | Endurance swim          | 06:30 | 45      | 1500m steady; bilateral breathing; 4x100 build at the end
+2026-09-15 | bike        | Trainer intervals       | 06:15 | 60      | 10 min easy; 4x8 min at threshold, 3 min easy; 10 min spin down
+2026-09-16 | run         | Easy run + strides      | 06:30 | 40      | Conversational pace; finish with 6x20s strides
+2026-09-17 | lift        | Strength: legs + core   | 07:00 | 45      | Squat 3x8, RDL 3x8, split squat 3x10/leg, plank 3x45s
+2026-09-18 | rest        | Rest                    | -     | -       | Full rest; mobility 10 min if stiff
+2026-09-19 | brick       | Brick: bike to run      | 07:00 | 90      | 60 min ride at race effort, transition, 30 min run at goal pace
+2026-09-20 | open_water  | Open water swim         | 07:30 | 50      | Sight every 6 strokes; two 800m loops with a beach exit between
+# week 2
+2026-09-21 | swim        | Endurance swim          | 06:30 | 45      | 1500m steady; bilateral breathing; 4x100 build at the end
+2026-09-22 | bike        | Trainer intervals       | 06:15 | 60      | 10 min easy; 4x8 min at threshold, 3 min easy; 10 min spin down
+2026-09-23 | run         | Easy run + strides      | 06:30 | 40      | Conversational pace; finish with 6x20s strides
+2026-09-24 | lift        | Strength: legs + core   | 07:00 | 45      | Squat 3x8, RDL 3x8, split squat 3x10/leg, plank 3x45s
+2026-09-25 | rest        | Rest                    | -     | -       | Full rest; mobility 10 min if stiff
+2026-09-26 | brick       | Brick: bike to run      | 07:00 | 90      | 60 min ride at race effort, transition, 30 min run at goal pace
+2026-09-27 | open_water  | Open water swim         | 07:30 | 50      | Sight every 6 strokes; two 800m loops with a beach exit between
+# week 3
+2026-09-28 | swim        | Endurance swim          | 06:30 | 45      | 1500m steady; bilateral breathing; 4x100 build at the end
+2026-09-29 | bike        | Trainer intervals       | 06:15 | 60      | 10 min easy; 4x8 min at threshold, 3 min easy; 10 min spin down
+2026-09-30 | run         | Easy run + strides      | 06:30 | 40      | Conversational pace; finish with 6x20s strides
+2026-10-01 | lift        | Strength: legs + core   | 07:00 | 45      | Squat 3x8, RDL 3x8, split squat 3x10/leg, plank 3x45s
+2026-10-02 | rest        | Rest                    | -     | -       | Full rest; mobility 10 min if stiff
+2026-10-03 | brick       | Brick: bike to run      | 07:00 | 90      | 60 min ride at race effort, transition, 30 min run at goal pace
+2026-10-04 | open_water  | Open water swim         | 07:30 | 50      | Sight every 6 strokes; two 800m loops with a beach exit between
+# week 4
+2026-10-05 | swim        | Endurance swim          | 06:30 | 45      | 1500m steady; bilateral breathing; 4x100 build at the end
+2026-10-06 | bike        | Trainer intervals       | 06:15 | 60      | 10 min easy; 4x8 min at threshold, 3 min easy; 10 min spin down
+2026-10-07 | run         | Easy run + strides      | 06:30 | 40      | Conversational pace; finish with 6x20s strides
+2026-10-08 | lift        | Strength: legs + core   | 07:00 | 45      | Squat 3x8, RDL 3x8, split squat 3x10/leg, plank 3x45s
+2026-10-09 | rest        | Rest                    | -     | -       | Full rest; mobility 10 min if stiff
+2026-10-10 | brick       | Brick: bike to run      | 07:00 | 90      | 60 min ride at race effort, transition, 30 min run at goal pace
+2026-10-11 | open_water  | Open water swim         | 07:30 | 50      | Sight every 6 strokes; two 800m loops with a beach exit between
+# week 5
+2026-10-12 | swim        | Endurance swim          | 06:30 | 45      | 1500m steady; bilateral breathing; 4x100 build at the end
+2026-10-13 | bike        | Trainer intervals       | 06:15 | 60      | 10 min easy; 4x8 min at threshold, 3 min easy; 10 min spin down
+2026-10-14 | run         | Easy run + strides      | 06:30 | 40      | Conversational pace; finish with 6x20s strides
+2026-10-15 | lift        | Strength: legs + core   | 07:00 | 45      | Squat 3x8, RDL 3x8, split squat 3x10/leg, plank 3x45s
+2026-10-16 | rest        | Rest                    | -     | -       | Full rest; mobility 10 min if stiff
+2026-10-17 | brick       | Brick: bike to run      | 07:00 | 90      | 60 min ride at race effort, transition, 30 min run at goal pace
+2026-10-18 | open_water  | Open water swim         | 07:30 | 50      | Sight every 6 strokes; two 800m loops with a beach exit between
+# week 6
+2026-10-19 | swim        | Endurance swim          | 06:30 | 45      | 1500m steady; bilateral breathing; 4x100 build at the end
+2026-10-20 | bike        | Trainer intervals       | 06:15 | 60      | 10 min easy; 4x8 min at threshold, 3 min easy; 10 min spin down
+2026-10-21 | run         | Easy run + strides      | 06:30 | 40      | Conversational pace; finish with 6x20s strides
+2026-10-22 | lift        | Strength: legs + core   | 07:00 | 45      | Squat 3x8, RDL 3x8, split squat 3x10/leg, plank 3x45s
+2026-10-23 | rest        | Rest                    | -     | -       | Full rest; mobility 10 min if stiff
+2026-10-24 | brick       | Brick: bike to run      | 07:00 | 90      | 60 min ride at race effort, transition, 30 min run at goal pace
+2026-10-25 | open_water  | Open water swim         | 07:30 | 50      | Sight every 6 strokes; two 800m loops with a beach exit between
+# week 7
+2026-10-26 | swim        | Endurance swim          | 06:30 | 45      | 1500m steady; bilateral breathing; 4x100 build at the end
+2026-10-27 | bike        | Trainer intervals       | 06:15 | 60      | 10 min easy; 4x8 min at threshold, 3 min easy; 10 min spin down
+2026-10-28 | run         | Easy run + strides      | 06:30 | 40      | Conversational pace; finish with 6x20s strides
+2026-10-29 | lift        | Strength: legs + core   | 07:00 | 45      | Squat 3x8, RDL 3x8, split squat 3x10/leg, plank 3x45s
+2026-10-30 | rest        | Rest                    | -     | -       | Full rest; mobility 10 min if stiff
+2026-10-31 | brick       | Brick: bike to run      | 07:00 | 90      | 60 min ride at race effort, transition, 30 min run at goal pace
+2026-11-01 | open_water  | Open water swim         | 07:30 | 50      | Sight every 6 strokes; two 800m loops with a beach exit between
+# week 8
+2026-11-02 | swim        | Endurance swim          | 06:30 | 45      | 1500m steady; bilateral breathing; 4x100 build at the end
+2026-11-03 | bike        | Trainer intervals       | 06:15 | 60      | 10 min easy; 4x8 min at threshold, 3 min easy; 10 min spin down
+2026-11-04 | run         | Easy run + strides      | 06:30 | 40      | Conversational pace; finish with 6x20s strides
+2026-11-05 | lift        | Strength: legs + core   | 07:00 | 45      | Squat 3x8, RDL 3x8, split squat 3x10/leg, plank 3x45s
+2026-11-06 | rest        | Rest                    | -     | -       | Full rest; mobility 10 min if stiff
+2026-11-07 | brick       | Brick: bike to run      | 07:00 | 90      | 60 min ride at race effort, transition, 30 min run at goal pace
+2026-11-08 | open_water  | Open water swim         | 07:30 | 50      | Sight every 6 strokes; two 800m loops with a beach exit between
+# week 9
+2026-11-09 | swim        | Endurance swim          | 06:30 | 22      | Taper: 1500m steady; bilateral breathing; 4x100 build at the end
+2026-11-10 | bike        | Trainer intervals       | 06:15 | 30      | Taper: 10 min easy; 4x8 min at threshold, 3 min easy; 10 min spin down
+2026-11-11 | run         | Easy run + strides      | 06:30 | 20      | Taper: Conversational pace; finish with 6x20s strides
+2026-11-12 | lift        | Strength: legs + core   | 07:00 | 22      | Taper: Squat 3x8, RDL 3x8, split squat 3x10/leg, plank 3x45s
+2026-11-13 | rest        | Rest                    | -     | -       | Full rest; mobility 10 min if stiff
+2026-11-14 | brick       | Brick: bike to run      | 07:00 | 45      | Taper: 60 min ride at race effort, transition, 30 min run at goal pace
+2026-11-15 | brick       | RACE DAY — Miami Man    | 06:00 | 240     | Race. Swim, bike, run. Nothing new on race day.
