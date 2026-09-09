@@ -155,6 +155,15 @@ echo "=== Bundle 43 — programs data foundation (R6.2a): contract, RLS forced, 
 bun test/programs-foundation.test.mjs
 
 echo ""
+echo "=== Bundle 47 — auth API: JWT verified IN CODE, aal2 REQUIRED, /api/interface scoped per person (A3.1/A3.2) ==="
+# bun explicitly, not $RUNNER: top-level await + dynamic import. Boots the real
+# router over node:http, signs synthetic JWTs with a TEST secret and a generated
+# P-256 pair through the DI seam, and drives the real CoS reader against a
+# PostgREST double that honours the user filter. Two users, two tokens, controls
+# on every refusal.
+bun test/auth-api.test.mjs
+
+echo ""
 echo "=== CoS reader/schema conformance ==="
 # The ONLY stage that can catch a reader/schema mismatch. Every other suite
 # passes happily while one exists, because the reader, the composer and the
