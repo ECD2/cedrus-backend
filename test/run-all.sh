@@ -175,6 +175,15 @@ echo "=== Bundle 46 — the brief's identity comes from user_settings rows, neve
 bun test/person-settings.test.mjs
 
 echo ""
+echo "=== Bundle 47 — auth API: JWT verified IN CODE, aal2 REQUIRED, /api/interface scoped per person (A3.1/A3.2) ==="
+# bun explicitly, not $RUNNER: top-level await + dynamic import. Boots the real
+# router over node:http, signs synthetic JWTs with a TEST secret and a generated
+# P-256 pair through the DI seam, and drives the real CoS reader against a
+# PostgREST double that honours the user filter. Two users, two tokens, controls
+# on every refusal.
+bun test/auth-api.test.mjs
+
+echo ""
 echo "=== Bundle 48 — isolation proofs A2, A5, A10 (P1.5): cross-user writes refused, anon reads nothing, no id crosses a log trace ==="
 # bun explicitly, not $RUNNER: top-level await + dynamic import, PGlite again.
 bun test/isolation-proofs.test.mjs

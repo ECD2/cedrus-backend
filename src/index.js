@@ -18,6 +18,7 @@ import interestsRouter from './routes/api/interests.js';
 import insightsRouter from './routes/api/insights.js';
 import remindersRouter from './routes/api/reminders.js';
 import goalsRouter from './routes/api/goals.js';
+import interfaceRouter from './routes/api/interface.js';
 import { corsMiddleware } from './lib/cors.js';
 import { startScheduler } from './jobs/scheduler.js';
 
@@ -57,6 +58,7 @@ app.use('/api/reminders', remindersRouter); // UI-09: read-only upcoming reminde
 app.use('/api/goals', goalsRouter); // INFRA-15: user-set goals CRUD + vital few (JWT, self-carries json+requireUser)
 app.use('/api/broadcasts', broadcastsRouter); // V1 web feed (item 3): GET /active (JWT, self-carries json+requireUser)
 app.use('/api/onboarding', onboardingAnswersRouter); // V1 web onboarding answers (item 5): POST /answers (JWT; distinct from PUBLIC /api/onboard)
+app.use('/api/interface', interfaceRouter); // A3.2: per-person read API — JWT verified IN CODE + aal2 required (self-carries json+requireUser); MUST precede the authed /api catch-all
 app.use('/api', apiRouter);      // N3: web capture, priority swap, restore (MOUNT_N3)
 
 // eslint-disable-next-line no-unused-vars
