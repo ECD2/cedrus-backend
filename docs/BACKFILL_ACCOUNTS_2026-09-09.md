@@ -65,6 +65,8 @@ Seen while writing the harness: silencing 1b's guard does not reach the suite, b
 
 **Bundle 42 harness: 8 guards, 0 missed.** Guards 2–6 mutate the P1.2 file, which still runs on apply and still refuses to commit a corrupted `provision_user`; the live function's posture is Bundle 44's. Guard 8 now mutates the live body.
 
+**Battery on merged main (Law 4)** — `sh test/run-all.sh` at merge `133c6d9` (branch commit `3f49c34` merged `--no-ff` into local `main` at `39c6d22`): **exit 0, FAIL=0.** Suites run, counted as `^=== … ===$` stage banners: **37**, of which 30 print after the `ALL WS-B SUITES PASSED` banner (that banner is not the gate). Every registered stage ran, Bundle 44 among them, between Bundle 43 and the CoS schema check; `contracts` announced its toolchain mode. Strict `^  PASS` total 2732 = 2668 (the R6.2a report's figure for `39c6d22`) + 64 (Bundle 44), with Bundle 42 still at 41 — reported with its method, not as a baseline. The R6.2a report's "59 suites" used a counting method it did not record; none of `^=== `, `^===|^---` (41) or the PASSED-banner count (66) reproduce it, so the comparable number across sessions is the strict PASS delta, not the suite count.
+
 ## What is a fixture, and what is unverified from this machine
 
 - `app_users`, `auth.users`, `auth.identities` and `supabase_migrations.schema_migrations` are fixtures, as in Bundles 42–43. Emil's row is given his real id because the script identifies him by it; the ghost is a suspended, unnamed member created 2026-07-10 (F0.2's result as recorded, not read from prod here).
