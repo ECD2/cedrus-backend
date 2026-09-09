@@ -66,6 +66,7 @@ import { renderBriefEmail } from '../services/cos/renderer.js';
 import { createResendTransport, deliveryEnv } from '../services/cos/resendTransport.js';
 import { claimSend, markSent, releaseClaim, alreadySentToday } from '../services/cos/ledger.js';
 import { writeBriefToCos, resolveCosUserId } from '../services/cos/writer.js';
+import { readTodaysProgram, computeTodaysProgram, resolveProgramOwner } from '../services/programs/today.js';
 
 /** Which model composes the brief. */
 export function briefModel(env = process.env) {
@@ -149,6 +150,8 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
     write = writeBriefToCos,
     logRun = defaultLogRun,
     resolveOwner = resolveCosUserId,
+    programOwner = resolveProgramOwner,
+    readProgram = readTodaysProgram,
   } = deps;
 
   // ── mode, announced every run, armed or not (Lesson 7) ────────────────────
@@ -282,6 +285,51 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
     });
   }
 
+  // ── today's program: the computed block, read BEFORE the model is paid ────
+  //
+  // Same pattern as the workspace-state block: deterministic lines, never
+  // asked of the model, no citations. It is read here, ahead of the model
+  // call, so a failure costs nothing. The owner is resolved from rows
+  // (user_settings.cos_user_id → app_users.id) with COS_BRIEF_USAGE_USER_ID
+  // as the fallback; unresolved is announced and the block is skipped.
+  //
+  // An UNREADABLE program table fails the run CLOSED, exactly as an
+  // unreadable CoS table does above. This is deliberate and it is also the
+  // Law 11 tripwire: if this code deploys before the programs migration is
+  // applied, the function does not exist, the read errors, and the brief
+  // aborts loudly instead of silently shipping without the block.
+  const owner2 = await programOwner({ env, cosUserId: userId });
+  let todaysProgram = [];
+  if (!owner2.appUserId) {
+    logger.event('programs.today.skipped', {
+      outcome: 'no_app_user',
+      message:
+        'no Cedrus app_users id could be resolved for this brief (user_settings.cos_user_id unset for this ' +
+        'CoS owner and COS_BRIEF_USAGE_USER_ID unset) — the today\'s-program block is skipped. The rest of the brief continues.',
+    });
+  } else {
+    const pr = await readProgram({ appUserId: owner2.appUserId, at: now });
+    if (!pr.ok) {
+      logger.event('cos.brief.aborted', {
+        level: 'error', error_category: 'db_error', outcome: 'fail_closed',
+        error_code: (pr.error && pr.error.code) || 'unknown',
+        message:
+          `program_items unreadable (${(pr.error && pr.error.code) || 'unknown'}: ${(pr.error && pr.error.message) || 'no detail'}) — ` +
+          'refusing to compose a brief from partial data. If this is 42883/PGRST202, the programs migration is not applied (Law 11).',
+      });
+      return { ran: false, reason: 'program_read_failed', sent: false, written: false };
+    }
+    todaysProgram = computeTodaysProgram(pr.rows);
+    logger.event('programs.today.read', {
+      outcome: todaysProgram.length ? 'items' : 'none',
+      count: pr.rows.length,
+      reason: owner2.source,
+      message: pr.rows.length
+        ? `today's program: ${pr.rows.length} item(s) across the owner's active programs (owner id source: ${owner2.source})`
+        : `today's program: no items scheduled today for this owner (owner id source: ${owner2.source}) — no block`,
+    });
+  }
+
   const minimized = enforceTotalSize(minimizeInput({ ...gathered.data, email_selection: sel }, now.getTime()));
   if (isEmptyInput(minimized)) {
     logger.event('cos.brief.empty', {
@@ -333,7 +381,9 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
     });
     return { ran: true, reason: validation.category, sent: false, written: false };
   }
-  const brief = validation.brief;
+  // The computed block travels WITH the brief, first-class and machine-readable,
+  // like workspace_state. Empty means no block, not an empty section.
+  const brief = { ...validation.brief, todays_program: todaysProgram };
 
   // ── dry run stops here, having proven everything except the wire ──────────
   if (dryRun) {

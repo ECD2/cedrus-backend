@@ -64,6 +64,15 @@ export function renderText(brief, now = new Date()) {
   const L = [];
   L.push(`CEDRUS DAILY BRIEF — ${now.toISOString().slice(0, 10)}`);
   L.push('');
+  // The computed today's-program block comes FIRST: the day's fixed
+  // commitment is what the rest of the brief has to fit around. Absent
+  // entirely when there is nothing scheduled — never an empty heading.
+  const program = brief.todays_program || [];
+  if (program.length > 0) {
+    L.push("TODAY'S PROGRAM");
+    for (const x of program) L.push(x.startsWith('  ') ? `  - ${x.trim()}` : x);
+    L.push('');
+  }
   L.push(brief.summary || '(no summary)');
   L.push('');
 
@@ -124,6 +133,16 @@ export function renderHtml(brief, now = new Date()) {
   P.push('<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;max-width:640px;margin:0 auto;color:#2c2a24;line-height:1.5">');
   P.push(`<p style="font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:#8a8570;margin:0 0 4px">Cedrus daily brief</p>`);
   P.push(`<p style="font-size:.8rem;color:#8a8570;margin:0 0 18px">${esc(now.toISOString().slice(0, 10))}</p>`);
+  const programLines = brief.todays_program || [];
+  if (programLines.length > 0) {
+    P.push('<h2 style="font-size:.8rem;letter-spacing:.06em;text-transform:uppercase;color:#737f45;margin:0 0 8px">Today\'s program</h2><ul style="margin:0 0 18px;padding-left:18px;list-style:none">');
+    for (const x of programLines) {
+      P.push(x.startsWith('  ')
+        ? `<li style="font-size:.86rem;margin:0 0 4px 14px">${esc(x.trim())}</li>`
+        : `<li style="font-size:.86rem;margin:6px 0 4px;font-weight:600">${esc(x)}</li>`);
+    }
+    P.push('</ul>');
+  }
   P.push(`<p style="font-size:.95rem;margin:0 0 8px">${esc(brief.summary || '(no summary)')}</p>`);
   P.push(`<p style="font-size:.72rem;color:#8a8570;font-style:italic;margin:0 0 22px">${esc(brief.model_disclaimer || '')}</p>`);
 

@@ -144,6 +144,17 @@ echo "=== Bundle 42 — provisionUser() is ONE atomic operation (P1.2) ==="
 bun test/provision-user.test.mjs
 
 echo ""
+echo "=== Bundle 43 — programs data foundation (R6.2a): contract, RLS forced, idempotent publish, today's block ==="
+# bun explicitly, not $RUNNER: top-level await + dynamic import, PGlite again.
+# Applies the REAL migration files (foundation, provision_user, programs) to a
+# real Postgres, publishes the two synthetic sources through the REAL function,
+# and proves isolation with a control in every test: user B reads zero of A's
+# rows alongside A reading them; the table OWNER reads zero (forced RLS); the
+# same source twice is one revision alongside a changed source making two.
+# It also SPAWNS the real load script to prove a dry run writes nothing.
+bun test/programs-foundation.test.mjs
+
+echo ""
 echo "=== CoS reader/schema conformance ==="
 # The ONLY stage that can catch a reader/schema mismatch. Every other suite
 # passes happily while one exists, because the reader, the composer and the
