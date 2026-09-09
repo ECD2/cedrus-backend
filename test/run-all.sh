@@ -168,6 +168,13 @@ echo "=== Bundle 44 — backfill through the provisioning path (P1.3): one code 
 bun test/normalize-account.test.mjs
 
 echo ""
+echo "=== Bundle 46 — the brief's identity comes from user_settings rows, never from an env var (P1.4 / B2.3 / A9) ==="
+# bun explicitly, not $RUNNER: top-level await + dynamic import. Resolves A then
+# B in one process, then a third person with no row, against a fake table; a
+# control in every test, and test/mutate-bundle-46.sh reddens each guard.
+bun test/person-settings.test.mjs
+
+echo ""
 echo "=== Bundle 48 — isolation proofs A2, A5, A10 (P1.5): cross-user writes refused, anon reads nothing, no id crosses a log trace ==="
 # bun explicitly, not $RUNNER: top-level await + dynamic import, PGlite again.
 bun test/isolation-proofs.test.mjs

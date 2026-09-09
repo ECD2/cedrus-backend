@@ -176,7 +176,63 @@ function fakeDb() {
   };
 }
 
-function makeDeps({ data = rawData(), brief = null, db = fakeDb(), modelThrows = false } = {}) {
+// ── a fake user_settings table (P1.4) ───────────────────────────────────────
+// The person's identity now comes from ROWS. Every armed run needs a table to
+// read, or the job reaches the real Cedrus client and burns ~7s against
+// http://supabase.invalid (the same trap `precheck` and `programOwner` avoid).
+// `rows` can be edited between runs; `error` makes every read fail the way
+// supabase-js fails: resolved { data: null, error }, never a throw.
+function fakeSettingsDb(rows = [], { error = null } = {}) {
+  const db = {
+    rows,
+    from(table) {
+      if (table !== 'user_settings') throw new Error('unexpected table: ' + table);
+      return {
+        select() {
+          const filters = [];
+          const q = {
+            eq(col, val) { filters.push((r) => String(r[col]) === String(val)); return q; },
+            not(col, op, val) {
+              if (op !== 'is' || val !== null) throw new Error('fake supports only .not(col, "is", null)');
+              filters.push((r) => r[col] !== null && r[col] !== undefined);
+              return q;
+            },
+            _rows() { return db.rows.filter((r) => filters.every((f) => f(r))); },
+            async maybeSingle() {
+              if (error) return { data: null, error };
+              const m = q._rows();
+              if (m.length > 1) return { data: null, error: { code: 'PGRST116', message: 'multiple rows' } };
+              return { data: m[0] ? { ...m[0] } : null, error: null };
+            },
+            then(resolve, reject) {
+              const out = error ? { data: null, error } : { data: q._rows().map((r) => ({ ...r })), error: null };
+              return Promise.resolve(out).then(resolve, reject);
+            },
+          };
+          return q;
+        },
+      };
+    },
+  };
+  return db;
+}
+
+// The person (app_users.id) and the ids their row binds. Distinct from OWNER
+// on purpose: OWNER is what the ENV says, and the P1.4 section asserts the job
+// ignores the env in favour of the row.
+const PERSON = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const OTHER_PERSON = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const GHOST_PERSON = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+const ROW_COS = '11111111-1111-4111-8111-111111111111';
+const OTHER_COS = '22222222-2222-4222-8222-222222222222';
+const ROW_USAGE = '33333333-3333-4333-8333-333333333333';
+const NONSENSE_COS = 'deadbeef-dead-4ead-8ead-deaddeaddead';
+const NONSENSE_USAGE = 'beefdead-beef-4eef-8eef-beefbeefbeef';
+
+// `settings` defaults to an EMPTY user_settings table — production's shape
+// until the P1.3 backfill — so the pre-existing runs below resolve the owner
+// through the announced env fallback exactly as the deployed job does today.
+function makeDeps({ data = rawData(), brief = null, db = fakeDb(), modelThrows = false, settings = fakeSettingsDb([]) } = {}) {
   const written = [];
   const deps = {
     gather: async () => ({ ok: true, data }),
@@ -201,6 +257,7 @@ function makeDeps({ data = rawData(), brief = null, db = fakeDb(), modelThrows =
     // precheck above avoids. This bundle is about the CoS side; the program
     // side is Bundle 43's, where it runs REAL against PGlite.
     programOwner: async () => ({ appUserId: null, source: 'test' }),
+    settingsDb: settings,
   };
   return { deps, written, db };
 }
@@ -993,20 +1050,20 @@ section('the owner-source label — the writeback announces the CALLER\'s proven
 {
   const writer = await import('../src/services/cos/writer.js');
 
-  // The production shape today: COS_USER_ID set, NO user_settings row (nothing
-  // in src/ reads that table). The job resolves 'env' and hands the id AND that
-  // source down. The label must say env — not settings.
+  // The pre-backfill production shape: COS_USER_ID set, NO user_settings row
+  // yet. The job resolves 'env' (after announcing that settings had nothing) and
+  // hands the id AND that source down. The label must say env — not settings.
   const viaEnv = await writer.resolveCosUserId({ env: { COS_USER_ID: OWNER }, cosUserId: OWNER, cosUserSource: 'env' });
   ok('COS_USER_ID set, no user_settings row: the label is env', viaEnv.source === 'env', viaEnv);
   ok('COS_USER_ID set, no user_settings row: the label is NOT settings', viaEnv.source !== 'settings', viaEnv);
 
   // CONTROL, and it discriminates: a caller that genuinely read
-  // user_settings.cos_user_id says so, and the label follows the caller. THAT
-  // PATH DOES NOT EXIST YET — nothing reads user_settings until P1.4
-  // (docs/BUILD_PLAN.md) — so this asserts only that the label is whatever the
-  // caller declared. The settings case is UNEXERCISED end to end until P1.4.
+  // user_settings.cos_user_id says so, and the label follows the caller. This
+  // asserts only that the label is whatever the caller declared; the settings
+  // path itself — the job reading the person's row — is exercised end to end
+  // in the P1.4 section below (2026-09-09).
   const viaSettings = await writer.resolveCosUserId({ env: {}, cosUserId: OWNER, cosUserSource: 'settings' });
-  ok('CONTROL: a caller declaring settings is labelled settings (settings path unexercised until P1.4)',
+  ok('CONTROL: a caller declaring settings is labelled settings (the path itself is proven in the P1.4 section)',
     viaSettings.source === 'settings', viaSettings);
 
   // A caller that names an id but declares no source is "a caller told me" and
@@ -1019,8 +1076,9 @@ section('the owner-source label — the writeback announces the CALLER\'s proven
   const envOnly = await writer.resolveCosUserId({ env: { COS_USER_ID: OWNER } });
   ok('no caller id, COS_USER_ID set: userId from env, source env', envOnly.userId === OWNER && envOnly.source === 'env', envOnly);
 
-  // End to end through the REAL job: it resolves the owner from COS_USER_ID
-  // and must carry THAT source into the writeback rather than dropping it.
+  // End to end through the REAL job with an EMPTY settings table: it resolves
+  // the owner from COS_USER_ID and must carry THAT source into the writeback
+  // rather than dropping it.
   reset();
   {
     const { deps, written } = makeDeps({ brief: briefCiting([{ type: 'open_loop', id: IDS.loop }]) });
@@ -1051,14 +1109,120 @@ section('the owner-source label — the writeback announces the CALLER\'s proven
   });
   const envEvents = await captureLogs(() => writer.writeBriefToCos(writeArgs({ cosUserSource: 'env' })));
   const envLine = eventNamed(envEvents, 'cos.brief.written');
-  ok('cos.brief.written reports "owner id source: env" today',
+  ok('cos.brief.written reports "owner id source: env" for an env-resolved id',
     !!envLine && /owner id source: env\)/.test(envLine.message), envLine && envLine.message);
-  ok('cos.brief.written does NOT say settings today',
+  ok('cos.brief.written does NOT say settings for an env-resolved id',
     !!envLine && !/settings/.test(envLine.message), envLine && envLine.message);
   const setEvents = await captureLogs(() => writer.writeBriefToCos(writeArgs({ cosUserSource: 'settings' })));
   const setLine = eventNamed(setEvents, 'cos.brief.written');
-  ok('CONTROL: a caller declaring settings is announced as settings (unexercised until P1.4)',
+  ok('CONTROL: a caller declaring settings is announced as settings',
     !!setLine && /owner id source: settings\)/.test(setLine.message), setLine && setLine.message);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section('P1.4 — the brief\'s identity comes from the person\'s ROW; the environment names nobody');
+{
+  const writer = await import('../src/services/cos/writer.js');
+  // Both legacy per-person variables set to NONSENSE. A code path that still
+  // reads either one produces a value these assertions can see; an env left
+  // unset would prove nothing (II.2: the control must discriminate).
+  const NONSENSE_ENV = { ...ARMED_ENV, COS_USER_ID: NONSENSE_COS, COS_BRIEF_USAGE_USER_ID: NONSENSE_USAGE };
+  const at = new Date('2026-09-10T11:00:00Z');
+  const bound = () => [
+    { user_id: PERSON, cos_user_id: ROW_COS, usage_user_id: ROW_USAGE },
+    // A row with NO CoS identity beside the real one — the shape the P1.3
+    // backfill leaves (Emil bound, the ghost account with settings but no ids).
+    { user_id: GHOST_PERSON, cos_user_id: null, usage_user_id: null },
+  ];
+
+  // One run, with every seam recording what reached it. The writeback is the
+  // REAL writeBriefToCos with only the insert faked, so cos.brief.written is
+  // the real announcement.
+  const runWith = async (settings, envOver = {}, extra = {}) => {
+    reset();
+    const db = fakeDb();
+    const made = makeDeps({ brief: briefCiting([{ type: 'open_loop', id: IDS.loop }]), db, settings });
+    const seen = { gathers: [], logRuns: [], models: 0 };
+    const g = made.deps.gather; made.deps.gather = async (a) => { seen.gathers.push(a.userId); return g(a); };
+    const m = made.deps.callModel; made.deps.callModel = async (a) => { seen.models++; return m(a); };
+    made.deps.logRun = async (a) => { seen.logRuns.push(a.usageUserId || null); };
+    made.deps.write = (a) => {
+      made.written.push(a);
+      return writer.writeBriefToCos({ ...a, deps: { insert: async () => ({ id: 'cos-brief-p14', error: null, disarmed: false }) } });
+    };
+    Object.assign(made.deps, extra);
+    let result;
+    const events = await captureLogs(async () => {
+      result = await runCosDailyBrief({ env: { ...NONSENSE_ENV, ...envOver }, now: at, deps: made.deps });
+    });
+    return { result, events, seen, written: made.written, ledgerKeys: [...db.rows.keys()] };
+  };
+
+  // ── the row supplies every id ─────────────────────────────────────────────
+  const r = await runWith(fakeSettingsDb(bound()));
+  ok('CONTROL: the run composed, sent and wrote back', r.result.ran && r.result.reason === 'ok' && r.result.sent === true && sends.length === 1, r.result);
+  ok('whose RECORDS: gather was scoped to the ROW\'s cos_user_id, not the env\'s',
+    r.seen.gathers.length === 1 && r.seen.gathers[0] === ROW_COS, r.seen.gathers);
+  ok('whose LEDGER SLOT: the claim key carries the ROW\'s id and not the nonsense',
+    r.ledgerKeys.length === 1 && r.ledgerKeys[0].includes(ROW_COS) && !r.ledgerKeys[0].includes(NONSENSE_COS), r.ledgerKeys);
+  ok('whose TODAY_BRIEFS ROW: the writeback got the ROW\'s id, labelled settings',
+    r.written.length === 1 && r.written[0].cosUserId === ROW_COS && r.written[0].cosUserSource === 'settings',
+    r.written[0] && [r.written[0].cosUserId, r.written[0].cosUserSource]);
+  ok('whose SPEND: logRun received the ROW\'s usage_user_id, not COS_BRIEF_USAGE_USER_ID',
+    r.seen.logRuns.length === 1 && r.seen.logRuns[0] === ROW_USAGE, r.seen.logRuns);
+  const wl = eventNamed(r.events, 'cos.brief.written');
+  ok('cos.brief.written reads "owner id source: settings" — true for the first time',
+    wl && /owner id source: settings\)/.test(wl.message), wl && wl.message);
+  ok('B2.3 CONTROL: a present row emits neither settings_missing, nor settings_unreadable, nor an abort',
+    !eventNamed(r.events, 'cos.owner.settings_missing') && !eventNamed(r.events, 'cos.owner.settings_unreadable') &&
+    !eventNamed(r.events, 'cos.brief.aborted'), r.events.map((e) => e.event));
+  ok('the unbound ghost row did NOT make the owner ambiguous (a holder is a row WITH a cos_user_id)', r.result.reason === 'ok', r.result);
+
+  // ── CONTROL: the row's id blanked ─────────────────────────────────────────
+  const blank = await runWith(fakeSettingsDb([{ user_id: PERSON, cos_user_id: null, usage_user_id: ROW_USAGE }]));
+  const warn = eventNamed(blank.events, 'cos.owner.settings_missing');
+  ok('B2.3: no row binds a CoS id ⇒ cos.owner.settings_missing at warn', warn && warn.level === 'warn', warn);
+  ok('until the backfill: the run then falls back to COS_USER_ID and the label says env',
+    blank.written.length === 1 && blank.written[0].cosUserSource === 'env' && blank.written[0].cosUserId === NONSENSE_COS,
+    blank.written[0] && [blank.written[0].cosUserId, blank.written[0].cosUserSource]);
+  const wl2 = eventNamed(blank.events, 'cos.brief.written');
+  ok('cos.brief.written reads "owner id source: env" when the fallback supplied the id',
+    wl2 && /owner id source: env\)/.test(wl2.message), wl2 && wl2.message);
+  ok('...and gather was scoped to that env id (the fallback is whole, not half)',
+    blank.seen.gathers.length === 1 && blank.seen.gathers[0] === NONSENSE_COS, blank.seen.gathers);
+
+  // ── the pre-backfill production shape: an EMPTY table ─────────────────────
+  const empty = await runWith(fakeSettingsDb([]));
+  ok('an EMPTY user_settings table (production until the backfill): announced, then env',
+    eventNamed(empty.events, 'cos.owner.settings_missing') && empty.written[0] && empty.written[0].cosUserSource === 'env',
+    empty.events.map((e) => e.event));
+
+  // ── two holders: refuse rather than choose ────────────────────────────────
+  const two = await runWith(fakeSettingsDb([
+    { user_id: PERSON, cos_user_id: ROW_COS, usage_user_id: ROW_USAGE },
+    { user_id: OTHER_PERSON, cos_user_id: OTHER_COS, usage_user_id: null },
+  ]));
+  const ab = eventNamed(two.events, 'cos.brief.aborted');
+  ok('A9: two people hold a CoS identity ⇒ the run REFUSES rather than choosing (ambiguous_owner, count 2)',
+    !two.result.ran && two.result.reason === 'ambiguous_owner' && ab && ab.reason === 'ambiguous_owner' && ab.count === 2, [two.result, ab]);
+  ok('...nothing gathered, nothing composed, nothing sent, nothing written',
+    two.seen.gathers.length === 0 && two.seen.models === 0 && sends.length === 0 && two.written.length === 0, two.seen);
+
+  // ── an UNREADABLE table is not an empty one ───────────────────────────────
+  const bad = await runWith(fakeSettingsDb([], { error: { code: '42P01', message: 'relation "user_settings" does not exist' } }));
+  const un = eventNamed(bad.events, 'cos.owner.settings_unreadable');
+  ok('an UNREADABLE table is announced as unreadable with its SQLSTATE — never as missing',
+    un && un.error_code === '42P01' && !eventNamed(bad.events, 'cos.owner.settings_missing'), bad.events.map((e) => e.event));
+  ok('until the backfill: unreadable then falls back to env, labelled env',
+    bad.written[0] && bad.written[0].cosUserSource === 'env', bad.written[0] && bad.written[0].cosUserSource);
+
+  // ── A9 through the whole job: A then B in one process ─────────────────────
+  const forA = await runWith(fakeSettingsDb([{ user_id: PERSON, cos_user_id: ROW_COS, usage_user_id: ROW_USAGE }]));
+  const forB = await runWith(fakeSettingsDb([{ user_id: OTHER_PERSON, cos_user_id: OTHER_COS, usage_user_id: null }]));
+  ok('A9: a run for A then a run for B in one process gather DIFFERENT people\'s records, each their own',
+    forA.seen.gathers[0] === ROW_COS && forB.seen.gathers[0] === OTHER_COS, [forA.seen.gathers, forB.seen.gathers]);
+  ok('...B\'s writeback is B\'s, not A\'s', forB.written[0] && forB.written[0].cosUserId === OTHER_COS, forB.written[0] && forB.written[0].cosUserId);
+  ok('...and B\'s NULL usage_user_id reaches logRun as null, not as A\'s', forB.seen.logRuns[0] === null && forA.seen.logRuns[0] === ROW_USAGE, [forA.seen.logRuns, forB.seen.logRuns]);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
