@@ -20,5 +20,8 @@
     "otplib": "^12",
     "qrcode": "^1.5.4",
     "twilio": "^5.2.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8"
   }
 }

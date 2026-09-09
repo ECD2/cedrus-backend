@@ -132,6 +132,18 @@ echo "=== Bundle 41 — multi-user isolation (a user change must never leak a re
 bun test/multiuser-isolation.test.mjs
 
 echo ""
+echo "=== Bundle 42 — provisionUser() is ONE atomic operation (P1.2) ==="
+# bun explicitly, not $RUNNER: top-level await + dynamic import, and PGlite
+# (a real Postgres 17 in-process) is a devDependency resolved from node_modules.
+# The suite applies the REAL migration files, including their in-transaction
+# self-proof, and forces every failure inside the database — never by mocking
+# the client. A missing node_modules/@electric-sql/pglite is a battery FAILURE,
+# not a skip: this is the only stage that proves the five writes are one
+# transaction, and a proof that silently did not run is the disease Lesson 7
+# treats.
+bun test/provision-user.test.mjs
+
+echo ""
 echo "=== CoS reader/schema conformance ==="
 # The ONLY stage that can catch a reader/schema mismatch. Every other suite
 # passes happily while one exists, because the reader, the composer and the
