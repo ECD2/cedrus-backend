@@ -34,6 +34,14 @@
 // Nothing reaches a person until mode 4's three variables are ALL set. Unsetting
 // any one of them stops delivery.
 //
+// ── WHOSE BRIEF (P1.4, 2026-09-09) ──────────────────────────────────────────
+// The person is found in ROWS, not in the environment: the user_settings row
+// that binds a CoS identity names whose records are gathered, whose ledger
+// slot is claimed, whose today_briefs row is written and whose account is
+// billed (see "WHOSE brief is this?" in the body). COS_USER_ID and
+// COS_BRIEF_USAGE_USER_ID are consulted only when the row cannot answer, that
+// is announced every time, and the commit after this one removes them.
+//
 // ── WHY ITS OWN DRY-RUN FLAG ────────────────────────────────────────────────
 // BRIEF_DRY_RUN is the SMS rail's switch and CEDRUS.md Law 5 reserves flipping
 // it for a named arming session. Overloading it would mean arming the SMS rail
@@ -66,6 +74,7 @@ import { renderBriefEmail } from '../services/cos/renderer.js';
 import { createResendTransport, deliveryEnv } from '../services/cos/resendTransport.js';
 import { claimSend, markSent, releaseClaim, alreadySentToday } from '../services/cos/ledger.js';
 import { writeBriefToCos, resolveCosUserId } from '../services/cos/writer.js';
+import { listCosIdentityHolders } from '../services/cos/personSettings.js';
 import { readTodaysProgram, computeTodaysProgram, resolveProgramOwner } from '../services/programs/today.js';
 
 /** Which model composes the brief. */
@@ -150,6 +159,10 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
     write = writeBriefToCos,
     logRun = defaultLogRun,
     resolveOwner = resolveCosUserId,
+    // The Cedrus service client handle for user_settings (personSettings.js
+    // defaults to the real one); a seam so the suite can supply rows.
+    settingsDb = undefined,
+    listHolders = listCosIdentityHolders,
     programOwner = resolveProgramOwner,
     readProgram = readTodaysProgram,
   } = deps;
@@ -180,34 +193,52 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
 
   // ── WHOSE brief is this? Resolved before anything is read ─────────────────
   //
-  // Every CoS read is now scoped to one user (forUser(userId).select), and the
+  // Every CoS read is scoped to one user (forUser(userId).select), and the
   // send ledger claims one slot per user per day. Both need the id before any
   // work starts, so it is resolved here rather than deep in the writeback where
   // it used to live.
   //
-  // Unresolved is FATAL to the run, and that is a deliberate change. Before
-  // multi-user, an unresolved owner only skipped the writeback: the brief was
-  // still composed and still emailed. That is no longer coherent — without an
-  // id there is no one whose records to gather, and composing from every user's
-  // rows is precisely the leak this session exists to close. Failing here costs
-  // one skipped run and says why; the alternative silently mails one person a
-  // brief built from everyone's data.
+  // TWO STEPS, BOTH FROM ROWS (P1.4 — "no environment variable names a person"):
   //
-  // This session still resolves exactly ONE owner per tick. Session B replaces
-  // this line with an iteration over the allowlist; everything downstream is
-  // already per-user and does not change again.
-  const owner = await resolveOwner({ env });
+  //   1. WHICH PERSON. The people whose user_settings row binds a CoS identity
+  //      (cos_user_id NOT NULL). This job still serves exactly ONE person per
+  //      tick — B2.2 turns this into an iteration — so one holder is the
+  //      person; two or more is a REFUSAL (ambiguous_owner), because choosing
+  //      one of two people is the guess A9 forbids and letting the environment
+  //      choose is the condition P1.4 exists to remove; none is ANNOUNCED
+  //      (cos.owner.settings_missing — B2.3: absence announces itself).
+  //   2. WHICH IDS. resolveOwner reads THAT person's row: cos_user_id is whose
+  //      CoS records, ledger slot and today_briefs row this is (source
+  //      'settings'); usage_user_id is whose agent_runs row records the spend.
+  //
+  // UNTIL THE P1.3 BACKFILL has populated user_settings.cos_user_id, both steps
+  // fall back to COS_USER_ID / COS_BRIEF_USAGE_USER_ID after announcing why
+  // (source 'env'). The next commit removes that fallback and fails closed.
+  //
+  // Unresolved is FATAL to the run, and that is deliberate. Before multi-user,
+  // an unresolved owner only skipped the writeback: the brief was still
+  // composed and still emailed. That is no longer coherent — without an id
+  // there is no one whose records to gather, and composing from every user's
+  // rows is precisely the leak the multi-user work exists to close. Failing
+  // here costs one skipped run and says why; the alternative silently mails
+  // one person a brief built from everyone's data.
+  const who = await selectPerson({ listHolders, settingsDb });
+  if (who.refused) return { ran: false, reason: who.source, sent: false, written: false };
+
+  const owner = await resolveOwner({ env, personId: who.personId, db: settingsDb });
   if (!owner.userId) {
+    const reason = owner.source === 'settings_missing' || owner.source === 'settings_unreadable' ? owner.source : 'no_user_id';
     logger.event('cos.brief.aborted', {
       level: 'error',
-      error_category: owner.source === 'disarmed' ? 'config' : 'config',
+      error_category: 'config',
       outcome: 'fail_closed',
+      reason,
       message:
         `cannot determine whose brief to compose (${owner.source}) — refusing to read CoS unscoped. ` +
-        'Set COS_USER_ID, or user_settings.cos_user_id for this person. ' +
+        'Set user_settings.cos_user_id for this person (or COS_USER_ID until the backfill). ' +
         'Nothing gathered, nothing composed, nothing billed.',
     });
-    return { ran: false, reason: 'no_user_id', sent: false, written: false };
+    return { ran: false, reason, sent: false, written: false };
   }
   const userId = owner.userId;
 
@@ -356,7 +387,7 @@ export async function runCosDailyBrief({ env = process.env, now = new Date(), de
 
   // Spend accounting. Without this the job's tokens are invisible to
   // DAILY_TOKEN_BUDGET and the guard undercounts (see the announcement below).
-  await logRun({ env, model: result.model || model, usage: result.usage, latencyMs });
+  await logRun({ env, model: result.model || model, usage: result.usage, latencyMs, usageUserId: owner.usageUserId || null });
 
   // What the compose actually cost, on every run and in every mode. Until this
   // line the only record of a model call was the spend row — which is written
@@ -528,34 +559,99 @@ function totalTokens(u) {
 }
 
 /**
+ * Which person this tick is for — step 1 of "whose brief is this" (see the
+ * job body). Rows, not env: the people whose user_settings row binds a CoS
+ * identity. Exactly one is the person; none is announced and (until the
+ * backfill) handed to the env fallback; two or more is refused, because this
+ * job iterates nobody yet (B2.2) and choosing between two people is the guess
+ * A9 forbids. An unreadable table is announced as such — never read as
+ * "nobody" (Lesson 1).
+ *
+ * Returns { personId, source, refused }. `refused: true` means the run must
+ * stop; the aborted line has already been emitted here so the count travels
+ * with it.
+ */
+async function selectPerson({ listHolders, settingsDb }) {
+  let holders;
+  try {
+    holders = await listHolders(settingsDb ? { db: settingsDb } : {});
+  } catch (err) {
+    const code = (err && err.code) || 'unknown';
+    logger.event('cos.owner.settings_unreadable', {
+      level: 'error', error_category: 'db_error', error_code: code, outcome: 'fallback',
+      message:
+        `user_settings could not be listed for CoS identity holders (${code}: ${(err && err.message) || String(err)}) — ` +
+        'no person can be resolved from settings; falling back to COS_USER_ID.',
+    });
+    return { personId: null, source: 'settings_unreadable', refused: false };
+  }
+  if (holders.length === 1) return { personId: holders[0], source: 'settings', refused: false };
+  if (holders.length === 0) {
+    logger.event('cos.owner.settings_missing', {
+      level: 'warn', outcome: 'no_row',
+      message:
+        'no user_settings row binds a CoS identity (cos_user_id is NULL for every row, or the table is empty) — ' +
+        'nobody can be resolved from settings; falling back to COS_USER_ID until the P1.3 backfill ' +
+        'populates user_settings.cos_user_id (B2.3: absence announces itself).',
+    });
+    return { personId: null, source: 'settings_missing', refused: false };
+  }
+  logger.event('cos.brief.aborted', {
+    level: 'error', error_category: 'config', outcome: 'fail_closed', reason: 'ambiguous_owner',
+    count: holders.length,
+    message:
+      `${holders.length} people hold a CoS identity in user_settings and this job serves ONE person per tick ` +
+      '(B2.2 iterates) — refusing to choose between them. Nothing gathered, nothing composed, nothing billed.',
+  });
+  return { personId: null, source: 'ambiguous_owner', refused: true };
+}
+
+/**
  * Record the spend so the budget guard can see it.
  *
  * v_daily_token_usage is built from this repo's `agent_runs` table, which
  * requires a Cedrus app_users id. That id lives in a DIFFERENT database from
- * COS_USER_ID (which is a CoS auth.users id), so it needs its own variable.
+ * the CoS user id, so it is its own column: user_settings.usage_user_id,
+ * carried here by the owner resolution as `usageUserId` (source 'settings').
+ * Until the P1.3 backfill it falls back to COS_BRIEF_USAGE_USER_ID (source
+ * 'env'); the next commit removes that fallback.
  *
- * Unset ⇒ the run is not recorded and the job SAYS SO on every run. That is a
- * real gap with a real consequence — this job's tokens would not count toward
- * DAILY_TOKEN_BUDGET — and an unannounced version of it is exactly the
- * "guard that cannot say it didn't run" shape (Lesson 7).
+ * Neither ⇒ the run is not recorded and the job SAYS SO on every run. That is
+ * a real gap with a real consequence — this job's tokens would not count
+ * toward DAILY_TOKEN_BUDGET — and an unannounced version of it is exactly the
+ * "guard that cannot say it didn't run" shape (Lesson 7). The recorded case
+ * announces its source too, so a post-deploy log can show which path ran.
+ *
+ * Exported, with `record` as a seam, so the suite can prove which id reaches
+ * agent_runs without a database.
  */
-async function defaultLogRun({ env, model, usage: u, latencyMs }) {
-  const userId = (env.COS_BRIEF_USAGE_USER_ID || '').trim();
+export async function defaultLogRun({ env = process.env, model, usage: u, latencyMs, usageUserId = null, record = usage.logAgentRun }) {
+  let userId = typeof usageUserId === 'string' && usageUserId.trim() !== '' ? usageUserId.trim() : '';
+  let source = userId ? 'settings' : '';
+  if (!userId) {
+    userId = (env.COS_BRIEF_USAGE_USER_ID || '').trim();
+    source = userId ? 'env' : '';
+  }
   if (!userId) {
     logger.event('cos.usage.unrecorded', {
       level: 'warn', outcome: 'not_recorded',
       message:
-        'COS_BRIEF_USAGE_USER_ID is unset, so this brief\'s token spend was NOT written to agent_runs and ' +
-        'does NOT count toward DAILY_TOKEN_BUDGET. Set it to the Cedrus app_users id to close the gap.',
+        'user_settings.usage_user_id is NULL for this person and COS_BRIEF_USAGE_USER_ID is unset, so this brief\'s ' +
+        'token spend was NOT written to agent_runs and does NOT count toward DAILY_TOKEN_BUDGET. ' +
+        'Set usage_user_id on the person\'s row to close the gap.',
     });
     return;
   }
   try {
-    await usage.logAgentRun({
+    await record({
       userId, runType: 'cos_daily_brief', model,
       promptTokens: (u && u.prompt_tokens) || 0,
       completionTokens: (u && u.completion_tokens) || 0,
       latencyMs, success: true,
+    });
+    logger.event('cos.usage.recorded', {
+      outcome: source,
+      message: `token spend recorded to agent_runs (usage id source: ${source})`,
     });
   } catch (err) {
     logger.event('cos.usage.log_failed', {

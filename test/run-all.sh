@@ -155,6 +155,13 @@ echo "=== Bundle 43 — programs data foundation (R6.2a): contract, RLS forced, 
 bun test/programs-foundation.test.mjs
 
 echo ""
+echo "=== Bundle 46 — the brief's identity comes from user_settings rows, never from an env var (P1.4 / B2.3 / A9) ==="
+# bun explicitly, not $RUNNER: top-level await + dynamic import. Resolves A then
+# B in one process, then a third person with no row, against a fake table; a
+# control in every test, and test/mutate-bundle-46.sh reddens each guard.
+bun test/person-settings.test.mjs
+
+echo ""
 echo "=== CoS reader/schema conformance ==="
 # The ONLY stage that can catch a reader/schema mismatch. Every other suite
 # passes happily while one exists, because the reader, the composer and the
