@@ -24,11 +24,30 @@
 //   • a run missing send.ok   → exit 1, and the output NAMES cos.send.ok
 //   • an empty file           → exit 2, printed as "no run in window"
 //   • exit 2 is not exit 0    — "found nothing" is not "found it fine"
+//
+// ADDED 2026-09-09 — the three facts the job now logs, read WITHOUT changing
+// the sequence or the exit codes:
+//   • cos.brief.aborted       → still exit 1, and the abort is the FIRST line
+//                               of the RESULT, with its fields and its table(s)
+//   • cos.brief.written       → the owner id source, repeated as printed
+//   • programs.today.read     → the item count and the block's owner source
+//   • every dump from before 2026-09-09 lacks all three, and absence is
+//     reported as absence: same verdicts, same exit codes as before.
+//
+// THE SEPTEMBER LINES ARE NOT FROM A DUMP EITHER. No railway_logs_* under
+// ~/Downloads carries cos.brief.aborted or programs.today.* (0 hits across all
+// of them, 2026-09-09), so each is written from its emit site — cosDailyBrief.js
+// for the three abort messages and the two programs events, writer.js for the
+// written line — in the line shape Railway rendered for the [ERROR] already in
+// with-errors.log (Lesson 20, flagged here as cos.compose.ok was above). They
+// are inline rather than files under test/fixtures/ so the line and the
+// assertion that reads it sit together and that flag cannot drift apart.
 
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir, homedir } from 'node:os';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
@@ -36,7 +55,10 @@ const SCRIPT = join(ROOT, 'scripts', 'verify-brief-run.mjs');
 const FIX = join(HERE, 'fixtures', 'verify-brief-run');
 
 const mod = await import('../scripts/verify-brief-run.mjs');
-const { parseLine, parseDump, findLatestRun, checkSequence, summarize, truncation, retriedTables, errorLines, report } = mod;
+const {
+  parseLine, parseDump, findLatestRun, checkSequence, summarize, truncation, retriedTables, errorLines, report,
+  abortedRun, ownerSource, programsBlock,
+} = mod;
 
 let failures = 0;
 const p = (...a) => console.log(...a);
@@ -51,14 +73,54 @@ const fixture = (n) => readFileSync(join(FIX, n), 'utf8');
 // Spawn the REAL script and return { code, out }. execFileSync throws on a
 // non-zero exit, which is the case we most need to observe, so the status is
 // taken off the error object rather than letting it propagate.
-function runCli(fixtureName) {
+function runCliAt(absPath) {
   try {
-    const out = execFileSync('node', [SCRIPT, join(FIX, fixtureName)], { encoding: 'utf8' });
+    const out = execFileSync('node', [SCRIPT, absPath], { encoding: 'utf8' });
     return { code: 0, out };
   } catch (err) {
     return { code: err.status, out: String(err.stdout || '') + String(err.stderr || '') };
   }
 }
+function runCli(fixtureName) { return runCliAt(join(FIX, fixtureName)); }
+
+// The inline September fixtures are written to a temp dir so the CLI can be
+// SPAWNED on them too — the exit code is the contract, and an in-process
+// report() return is not the same fact (see the header).
+const TMP = mkdtempSync(join(tmpdir(), 'verify-brief-run-'));
+process.on('exit', () => { try { rmSync(TMP, { recursive: true, force: true }); } catch { /* best effort */ } });
+function tmpFixture(name, text) { const path = join(TMP, name); writeFileSync(path, text); return path; }
+
+// One September run, line by line, in the exact shape the 2026-09-04 dump
+// renders (ingest ts, [LEVEL], message, then timestamp="…" first in the
+// structured tail as buildLogRecord() writes it). Project ref → cos.invalid,
+// correlation id replaced. Field ORDER on each tail is the order the emit site
+// passes them, which is the order buildLogRecord() copies them.
+const SEP_CID = 'abababab-1111-1111-1111-abababababab';
+const sep = (ingest, level, message, ts, event, tail) =>
+  `${ingest} [${level}] ${message} timestamp="${ts}" event="${event}" service="cedrus-backend" environment="production" correlation_id="${SEP_CID}" trace_stage="dispatch" ${tail}`;
+const L = {
+  mode: sep('2026-09-10T11:00:04.103162294Z', 'INFO', 'CoS reader ARMED against cos.invalid', '2026-09-10T11:00:01.012Z', 'cos.mode', 'outcome="armed"'),
+  delivery: sep('2026-09-10T11:00:04.103171552Z', 'INFO', 'delivery LIVE — a composed brief will be emailed and written back to CoS', '2026-09-10T11:00:01.012Z', 'cos.delivery.mode', 'outcome="live"'),
+  retried: sep('2026-09-10T11:00:05.772775953Z', 'INFO', 'CoS decisions succeeded on attempt 2 after a transient failure', '2026-09-10T11:00:02.980Z', 'cos.read.retried', 'outcome="recovered" retry_count=1'),
+  truncated: sep('2026-09-10T11:00:05.772783258Z', 'WARN', 'email selection capped: 20 of 53 eligible messages considered', '2026-09-10T11:00:02.982Z', 'cos.email.truncated', 'outcome="truncated" considered=20 eligible_total=53 total_is_floor=false'),
+  // src/jobs/cosDailyBrief.js — the programs block, three shapes.
+  programsRead: sep('2026-09-10T11:00:05.900000000Z', 'INFO', "today's program: 3 item(s) across the owner's active programs (owner id source: settings)", '2026-09-10T11:00:03.100Z', 'programs.today.read', 'outcome="items" count=3 reason="settings"'),
+  programsNone: sep('2026-09-10T11:00:05.900000000Z', 'INFO', "today's program: no items scheduled today for this owner (owner id source: env) — no block", '2026-09-10T11:00:03.100Z', 'programs.today.read', 'outcome="none" count=0 reason="env"'),
+  programsSkipped: sep('2026-09-10T11:00:05.900000000Z', 'INFO', "no Cedrus app_users id could be resolved for this brief (user_settings.cos_user_id unset for this CoS owner and COS_BRIEF_USAGE_USER_ID unset) — the today's-program block is skipped. The rest of the brief continues.", '2026-09-10T11:00:03.100Z', 'programs.today.skipped', 'outcome="no_app_user"'),
+  compose: sep('2026-09-10T11:00:11.184027636Z', 'INFO', '', '2026-09-10T11:00:10.747Z', 'cos.compose.ok', 'outcome="composed" latency_ms=7609 tokens=6145 model="gpt-4.1-mini-2025-04-14"'),
+  send: sep('2026-09-10T11:00:13.431085037Z', 'INFO', 'daily brief sent via resend', '2026-09-10T11:00:11.570Z', 'cos.send.ok', 'outcome="sent" latency_ms=292'),
+  // src/services/cos/writer.js — the source is in the message and nowhere else.
+  writtenEnv: sep('2026-09-10T11:00:13.431092214Z', 'INFO', 'brief written back to CoS today_briefs (owner id source: env)', '2026-09-10T11:00:11.934Z', 'cos.brief.written', 'outcome="ok"'),
+  writtenSettings: sep('2026-09-10T11:00:13.431092214Z', 'INFO', 'brief written back to CoS today_briefs (owner id source: settings)', '2026-09-10T11:00:11.934Z', 'cos.brief.written', 'outcome="ok"'),
+  writtenUnstated: sep('2026-09-10T11:00:13.431092214Z', 'INFO', 'brief written back to CoS today_briefs', '2026-09-10T11:00:11.934Z', 'cos.brief.written', 'outcome="ok"'),
+  // src/jobs/cosDailyBrief.js — the three cos.brief.aborted emit sites. None
+  // passes `reason`; the tail is exactly what each site hands the logger.
+  abortedTables: sep('2026-09-10T11:00:05.900000000Z', 'ERROR', 'CoS tables unreadable (email_ai_analyses, decisions) — refusing to compose a brief from partial data', '2026-09-10T11:00:03.401Z', 'cos.brief.aborted', 'error_category="db_error" outcome="fail_closed"'),
+  abortedProgramItems: sep('2026-09-10T11:00:05.900000000Z', 'ERROR', 'program_items unreadable (42883: function public.todays_program_items(uuid, timestamp with time zone) does not exist) — refusing to compose a brief from partial data. If this is 42883/PGRST202, the programs migration is not applied (Law 11).', '2026-09-10T11:00:03.401Z', 'cos.brief.aborted', 'error_category="db_error" outcome="fail_closed" error_code="42883"'),
+  abortedNoOwner: sep('2026-09-10T11:00:04.200000000Z', 'ERROR', 'cannot determine whose brief to compose (unresolved) — refusing to read CoS unscoped. Set COS_USER_ID, or user_settings.cos_user_id for this person. Nothing gathered, nothing composed, nothing billed.', '2026-09-10T11:00:01.100Z', 'cos.brief.aborted', 'error_category="config" outcome="fail_closed"'),
+};
+const dump = (...lines) => lines.join('\n') + '\n';
+const resultLine = (out) => out.split('\n').find((l) => l.startsWith('RESULT:')) || '';
 
 // Collect report()'s output instead of printing it, so a run's summary can be
 // asserted on without 200 lines of noise in the suite output.
@@ -325,6 +387,192 @@ section('errors — the [LEVEL] tag, because level=error can never match');
 
   ok('a FATAL with no bracket tag is caught too',
     errorLines('some line\nFATAL unhandled rejection\nother').length === 1);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section('an aborted run — the abort is the FIRST line of the result (2026-09-09)');
+{
+  const dumpT = dump(L.mode, L.delivery, L.retried, L.abortedTables);
+  const r = runCliAt(tmpFixture('aborted-tables.log', dumpT));
+  ok('an aborted run exits 1 — the code a broken sequence has always had, not a new one', r.code === 1, r);
+  const result = resultLine(r.out);
+  ok('the RESULT line names cos.brief.aborted',
+    /^RESULT: BROKEN SEQUENCE — ABORTED \(cos\.brief\.aborted\)/.test(result), result);
+  ok('...with the fields the line actually carries, under their own names',
+    /error_category=db_error outcome=fail_closed/.test(result), result);
+  ok('...and BOTH tables it names', /CoS tables unreadable: email_ai_analyses, decisions/.test(result), result);
+  const iAbort = r.out.indexOf('ABORTED');
+  const iMissing = r.out.indexOf('missing step: cos.compose.ok');
+  ok('the missing step is still named, and it comes AFTER the abort line',
+    iAbort !== -1 && iMissing > iAbort, { iAbort, iMissing });
+  // 11:00:01.012Z → 11:00:03.401Z on the service clock. Exact, for the same
+  // reason the complete run's 10776 ms is exact: the wrong pair of lines also
+  // yields a plausible number.
+  ok('the abort ends the run: wall time is cos.mode → cos.brief.aborted, 2389 ms on the service clock',
+    /wall time\s+2389 ms \(2\.39 s\)\s+\(cos\.mode → cos\.brief\.aborted\)/.test(r.out), r.out);
+
+  // CONTROL. The identical dump minus the abort line is an ordinary broken
+  // sequence: same exit code, the plain RESULT line, no ABORTED anywhere. If
+  // this did not differ, the assertions above would be reading the missing-
+  // step path and calling it abort handling.
+  const c = runCliAt(tmpFixture('aborted-tables-control.log', dump(L.mode, L.delivery, L.retried)));
+  ok('CONTROL: without the abort line — exit 1, plain "missing step" RESULT, no ABORTED',
+    c.code === 1 && !/ABORTED/.test(c.out) && /RESULT: BROKEN SEQUENCE — missing step: cos\.compose\.ok/.test(c.out), c.out);
+  ok('CONTROL: an abort is not exit 0 and not exit 2 — no new code was invented', r.code !== 0 && r.code !== 2, r.code);
+  // An abort line that belongs to ANOTHER correlation id (with-errors.log) is
+  // an error in the file, not this run's abort: the run stays complete.
+  const other = runCli('with-errors.log');
+  ok('CONTROL: an abort line outside the run is listed under errors and does NOT become this run\'s abort',
+    other.code === 0 && !/ABORTED/.test(other.out) && /1 line\(s\) matching/.test(other.out), other.out);
+
+  // The two other emit sites, each with its own message shape.
+  const pi = runCliAt(tmpFixture('aborted-program-items.log', dump(L.mode, L.delivery, L.retried, L.truncated, L.abortedProgramItems)));
+  const piResult = resultLine(pi.out);
+  ok('the program_items abort names program_items and carries error_code=42883 (the Law 11 tripwire)',
+    pi.code === 1 && /table unreadable: program_items/.test(piResult) && /error_code=42883/.test(piResult), piResult);
+  ok('...and does NOT read the error detail in the parenthetical as a table list',
+    !/42883: function/.test(piResult) && !/uuid/.test(piResult), piResult);
+
+  const own = runCliAt(tmpFixture('aborted-no-owner.log', dump(L.mode, L.delivery, L.abortedNoOwner)));
+  const ownResult = resultLine(own.out);
+  ok('the no-owner abort reports error_category=config, the owner source, and that no table is named',
+    own.code === 1 && /error_category=config/.test(ownResult) && /owner source: unresolved/.test(ownResult)
+    && /no table named/.test(ownResult), ownResult);
+
+  // The pure function, driven directly.
+  const a = abortedRun(parseDump(dumpT));
+  ok('abortedRun() reads the fields structurally and the tables from the prose',
+    a.errorCategory === 'db_error' && a.outcome === 'fail_closed' && a.errorCode === null
+    && a.tables.length === 2 && a.tables[0] === 'email_ai_analyses' && a.tables[1] === 'decisions' && a.parsed === true, a);
+  const b = abortedRun(parseDump(L.abortedProgramItems));
+  ok('...program_items: one table, error_code 42883',
+    b.tables.length === 1 && b.tables[0] === 'program_items' && b.errorCode === '42883', b);
+  const o = abortedRun(parseDump(L.abortedNoOwner));
+  ok('...no owner: zero tables, ownerSource unresolved, error_category config',
+    o.tables.length === 0 && o.ownerSource === 'unresolved' && o.errorCategory === 'config', o);
+  ok('no abort line ⇒ null, not an empty record', abortedRun(parseDump(fixture('complete.log'))) === null);
+  // Asserted so nobody "fixes" the parser to read a key that is not there.
+  const abortedFields = parseLine(L.abortedTables).fields;
+  ok('CONTROL: the aborted line carries NO reason field — error_category and outcome are what it has',
+    abortedFields.reason === undefined && abortedFields.error_category === 'db_error' && abortedFields.outcome === 'fail_closed',
+    abortedFields);
+  // A shape this parser does not know is surfaced, not smoothed into "no table".
+  const odd = abortedRun(parseDump(sep('2026-09-10T11:00:05.900000000Z', 'ERROR', 'something new happened — details follow',
+    '2026-09-10T11:00:03.401Z', 'cos.brief.aborted', 'error_category="internal" outcome="fail_closed"')));
+  ok('an unrecognised abort message is reported as its first clause and marked unparsed',
+    odd.parsed === false && odd.cause === 'something new happened' && odd.tables.length === 0, odd);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section('the owner id source on cos.brief.written — prose-only, repeated as printed (2026-09-09)');
+{
+  const d = ownerSource(findLatestRun(parseDump(fixture('complete.log'))).lines);
+  ok("the August shape says 'derived'", d !== null && d.stated === true && d.source === 'derived', d);
+  const aug = capture(fixture('complete.log'));
+  ok('...and the report prints it', /written\s+ok — owner id source: derived/.test(aug.out), aug.out);
+  ok("...without the 'settings' caveat", !/until 9e9a91d/.test(aug.out), aug.out);
+
+  const st = capture(dump(L.mode, L.delivery, L.compose, L.send, L.writtenSettings));
+  ok("a 'settings' label is repeated as printed", /written\s+ok — owner id source: settings/.test(st.out), st.out);
+  ok('...WITH the caveat naming the build that stamped it on any id (II.5)', /until 9e9a91d \(2026-09-04\)/.test(st.out), st.out);
+  ok('...and the run is still complete, exit 0 — the label is reported, not judged', st.code === 0, st.code);
+
+  const en = capture(dump(L.mode, L.delivery, L.compose, L.send, L.writtenEnv));
+  ok("an 'env' label is printed plain, no caveat",
+    /written\s+ok — owner id source: env/.test(en.out) && !/until 9e9a91d/.test(en.out), en.out);
+
+  const un = capture(dump(L.mode, L.delivery, L.compose, L.send, L.writtenUnstated));
+  ok('a written line with no source phrase says so rather than inventing one',
+    /written\s+ok — owner id source not stated on this line/.test(un.out), un.out);
+  const unParsed = ownerSource(parseDump(L.writtenUnstated));
+  ok('...and ownerSource() returns stated:false, source:null', unParsed.stated === false && unParsed.source === null, unParsed);
+
+  ok('no written line ⇒ null', ownerSource(parseDump(fixture('precheck-skipped.log'))) === null);
+  const skip = capture(fixture('precheck-skipped.log'));
+  ok('a precheck skip prints no written line — it claims no writeback that never happened', !/^written/m.test(skip.out), skip.out);
+  const noWrite = capture(fixture('complete.log').split('\n').filter((l) => !l.includes('cos.brief.written')).join('\n'));
+  ok('a live run missing the written line says so, and is broken (exit 1) as before',
+    /written\s+\(no cos\.brief\.written line\)/.test(noWrite.out) && noWrite.code === 1, noWrite);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section("the today's-program block — count and owner source, both structured (2026-09-09)");
+{
+  const withProg = dump(L.mode, L.delivery, L.retried, L.truncated, L.programsRead, L.compose, L.send, L.writtenEnv);
+  const r = runCliAt(tmpFixture('complete-with-programs.log', withProg));
+  ok('a complete run WITH programs.today.read still exits 0 — an interleaved event is not a broken sequence', r.code === 0, r);
+  ok('...and reports the item count', /programs\s+3 item\(s\) today/.test(r.out), r.out);
+  ok('...and the owner id source the BLOCK resolved (settings)',
+    /programs\s+3 item\(s\) today.*owner id source: settings/.test(r.out), r.out);
+  ok("...separately from the WRITEBACK's source (env) — two lookups, and they can disagree",
+    /written\s+ok — owner id source: env/.test(r.out), r.out);
+
+  const pb = programsBlock(findLatestRun(parseDump(withProg)).lines);
+  ok('programsBlock() reads count and reason from the STRUCTURED fields',
+    pb.event === 'programs.today.read' && pb.outcome === 'items' && pb.count === 3 && pb.ownerSource === 'settings', pb);
+  ok('count is a NUMBER, not the string "3"', typeof pb.count === 'number', typeof pb.count);
+  // CONTROL: the count comes from count=, not from "3 item(s)" in the prose.
+  // Change the field, keep the prose; a prose reader would still say 3.
+  const pb7 = programsBlock(parseDump(L.programsRead.replace('count=3', 'count=7')));
+  ok('CONTROL: the count is read from count=, not from the prose', pb7.count === 7, pb7);
+
+  const none = capture(dump(L.mode, L.delivery, L.programsNone, L.compose, L.send, L.writtenEnv));
+  ok('count=0 / outcome=none is "no items today", with 0 kept as 0 (not read as missing)',
+    /programs\s+no items today\s+\(programs\.today\.read count=0, owner id source: env\)/.test(none.out) && none.code === 0, none.out);
+  ok('...programsBlock() gives count 0, not null', programsBlock(parseDump(L.programsNone)).count === 0);
+
+  const sk = capture(dump(L.mode, L.delivery, L.programsSkipped, L.compose, L.send, L.writtenEnv));
+  ok('programs.today.skipped is reported as a skipped block, and the run is still complete',
+    /programs\s+block skipped — no_app_user/.test(sk.out) && sk.code === 0, sk.out);
+
+  // Absence. Every dump written before 2026-09-09 has no programs line at all,
+  // and that is reported as the normal state of an older build — not an
+  // error, and not a change of verdict.
+  const old = capture(fixture('complete.log'));
+  ok('a dump with no programs line reports its absence in so many words',
+    /programs\s+\(no programs\.today\.\* line on this run/.test(old.out), old.out);
+  ok('...and says "not an error"', /not an error\)/.test(old.out), old.out);
+  ok('...and is still a complete run, exit 0', old.code === 0 && /RESULT: complete run/.test(old.out), old.code);
+  ok('programsBlock() ⇒ null on it', programsBlock(findLatestRun(parseDump(fixture('complete.log'))).lines) === null);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+section('the real dumps on this machine — verdicts unchanged by the new reporting');
+{
+  // The four dumps this work was asked to keep passing. Two of them were exit
+  // 1 BEFORE it touched anything: the full 08-26 dump and its filtered copy
+  // both hold the 08-25 11:00 run as their newest, and that run predates
+  // cos.compose.ok (dee339d, 2026-08-26). So the assertion is the honest one —
+  // the verdict inherited is the verdict left — not "exit 0" for all four,
+  // which was never true.
+  //
+  // This section can only run on the machine that holds ~/Downloads. A silent
+  // skip would be indistinguishable from a pass (Lesson 7), so each absent
+  // file is printed and counted, and the count is printed at the end.
+  const REAL = [
+    ['railway_logs_2026-08-26.txt', 1, 'derived-cached', 'its newest run is 08-25, before cos.compose.ok shipped'],
+    ['railway_logs_2026-08-26_1100run.txt', 0, 'derived', 'the first run with cos.compose.ok'],
+    ['railway_logs_2026-08-26_filtered.txt', 1, 'derived-cached', 'the same 08-25 run, filtered'],
+    ['railway_logs_2026-09-04.txt', 0, 'settings', 'the label writer.js stamped before 9e9a91d'],
+  ];
+  let ran = 0;
+  let absent = 0;
+  for (const [name, code, label, why] of REAL) {
+    const path = join(homedir(), 'Downloads', name);
+    if (!existsSync(path)) {
+      p(`  SKIP  ${name} — not under ~/Downloads on this machine (announced; not a pass)`);
+      absent++;
+      continue;
+    }
+    ran++;
+    const r = runCliAt(path);
+    ok(`${name}: exit ${code}, as before this work (${why})`, r.code === code, { code: r.code });
+    ok(`...owner id source read from its written line as '${label}'`,
+      new RegExp(`written\\s+ok — owner id source: ${label}`).test(r.out), r.out.split('\n').filter((l) => /^written/.test(l)));
+    ok('...no programs line, reported as absence; no ABORTED',
+      /no programs\.today\.\* line/.test(r.out) && !/ABORTED/.test(r.out), r.out);
+  }
+  p(`  real dumps: ${ran} run, ${absent} absent (announced above)`);
 }
 
 p('');
