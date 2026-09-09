@@ -16,3 +16,6 @@ supabase/.branches/
 # name was committable — and committing one replaced the real directory with a
 # self-referential link, breaking module resolution repo-wide (2026-08-20).
 node_modules
+
+# Python bytecode from running the apply/backfill scripts (a .pyc carries NULs and would trip test/no-nul-bytes.sh once tracked)
+scripts/__pycache__/

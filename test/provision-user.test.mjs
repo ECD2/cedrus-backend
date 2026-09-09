@@ -16,6 +16,12 @@
 //   • supabase/migrations/20260830120000_multiuser_foundation.sql, verbatim,
 //     including its own in-transaction self-proof and controls
 //   • supabase/migrations/20260909120000_provision_user.sql, verbatim, ditto
+//   • supabase/migrations/20260909210000_normalize_account.sql, verbatim, ditto
+//     — P1.3 REDEFINES provision_user so that its tail (settings, grants, one
+//     audit row) runs inside normalize_account(). The function under test is
+//     the LIVE one, i.e. after all three files, exactly as production has it.
+//     A fresh account therefore carries TWO audit rows: provision_user (the
+//     identity) and normalize_account (the shape). Bundle 44 owns the shape.
 //   • src/services/provisioning.js, the thin caller, through a client whose
 //     rpc() executes the real function on the real database
 //
@@ -58,6 +64,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, '..');
 const FOUNDATION_SQL = readFileSync(join(REPO, 'supabase/migrations/20260830120000_multiuser_foundation.sql'), 'utf8');
 const PROVISION_SQL = readFileSync(join(REPO, 'supabase/migrations/20260909120000_provision_user.sql'), 'utf8');
+const NORMALIZE_SQL = readFileSync(join(REPO, 'supabase/migrations/20260909210000_normalize_account.sql'), 'utf8');
 
 const p = console.log;
 let failures = 0;
@@ -196,13 +203,14 @@ try {
     insert into app_users (phone, name, role, account_status) values ('17860000003', 'Suspended Admin', 'admin', 'suspended');
   `);
   await db.exec(PROVISION_SQL);
+  await db.exec(NORMALIZE_SQL);
   applied = true;
 } catch (e) {
   applyError = { message: e.message, code: e.code, detail: e.detail };
 }
 
 section('the migrations, with their own in-transaction self-proof');
-ok('the foundation migration and the provision_user migration both applied — every assertion and control inside them passed', applied, applyError);
+ok('the foundation, provision_user and normalize_account migrations all applied — every assertion and control inside them passed', applied, applyError);
 if (!applied) finish();
 
 const EMIL = (await one(`select id from app_users where phone = '17860000001'`)).id;
@@ -214,7 +222,7 @@ const SUSPENDED = (await one(`select id from app_users where phone = '1786000000
 ok('the migration\'s controls left no rows behind (control phones, provision audit rows)',
   (await count(`app_users where phone in ('15550100142','15550100143')`)) === 0
   && (await count(`auth.users where phone in ('15550100142','15550100143')`)) === 0
-  && (await count(`admin_audit where action = 'provision_user'`)) === 0);
+  && (await count(`admin_audit where action in ('provision_user', 'normalize_account')`)) === 0);
 
 // ── the client: rpc() runs the real function on the real database ───────────
 // Shaped like supabase-js: { data, error } and never throws, with the SQLSTATE
@@ -325,14 +333,16 @@ section('control — the successful path creates all five');
   ok('4/5 the capability grants: the two distinct names, granted, by the actor (the duplicate collapsed)',
     caps.length === 2 && caps.every((c) => c.granted === true && c.granted_by === EMIL)
       && caps.map((c) => c.capability).join(',') === 'receive_brief,receive_sms', caps);
-  const aud = uid ? (await db.query(`select actor_user_id, action, target_user_id, detail from admin_audit where target_user_id = $1`, [uid])).rows : [];
-  ok('5/5 exactly ONE audit entry: actor, action provision_user, target, last-4 of the phone (never the full number), the capabilities',
+  const aud = uid ? (await db.query(`select actor_user_id, action, target_user_id, detail from admin_audit where target_user_id = $1 and action = 'provision_user'`, [uid])).rows : [];
+  ok('5/5 exactly ONE provision_user audit entry: actor, action provision_user, target, last-4 of the phone (never the full number), the capabilities',
     aud.length === 1 && aud[0].actor_user_id === EMIL && aud[0].action === 'provision_user'
       && aud[0].detail.phone_last4 === '0199' && !JSON.stringify(aud[0].detail).includes('17865550199')
       && JSON.stringify(aud[0].detail.capabilities) === '["receive_brief","receive_sms"]', aud);
 
   const auditAfter = await count('admin_audit');
-  ok('the audit row count went 0 → exactly 1 (not 1 → 2)', auditBefore === 0 && auditAfter === 1, { auditBefore, auditAfter });
+  ok('the audit row count went 0 → exactly 2: one provision_user row (the identity) and one normalize_account row (the shape, P1.3) — not 3, not 1',
+    auditBefore === 0 && auditAfter === 2
+      && (await count(`admin_audit where target_user_id = $1 and action = 'normalize_account'`, [uid])) === 1, { auditBefore, auditAfter });
 
   ok('the return value names the new ids and the normalised capabilities',
     !!result && typeof result.audit_id === 'string' && result.phone === '17865550199'
@@ -359,8 +369,8 @@ section('fail it midway — after the account row, at the capability grant (clos
   const after = await totals();
   ok('fault at the capability step (closed vocabulary): no partial account survives — zero app_users, auth.users, auth.identities, admin_audit rows for that phone; settings and capability totals unchanged',
     allZero(left) && sameTotals(before, after), { left, before, after });
-  ok('fault at the capability step (closed vocabulary): the admin_audit total did not move (still exactly 1)',
-    after.audit === 1 && before.audit === 1, { before: before.audit, after: after.audit });
+  ok('fault at the capability step (closed vocabulary): the admin_audit total did not move (still exactly 2)',
+    after.audit === 2 && before.audit === 2, { before: before.audit, after: after.audit });
 }
 
 // ── FAULT 2: a trigger on user_capabilities, with VALID names ───────────────
@@ -503,8 +513,9 @@ section('pins — the shape the migration promised');
   ok('execute: anon NO, authenticated NO, service_role YES', priv.anon === false && priv.authenticated === false && priv.service_role === true, priv);
 
   const finalTotals = await totals();
-  ok('end state: three accounts were provisioned in this run, each with exactly one audit row (3 = 3)',
+  ok('end state: three accounts were provisioned in this run, each with exactly one provision_user and one normalize_account audit row (3 = 3 = 3)',
     (await count(`admin_audit where action = 'provision_user'`)) === 3
+      && (await count(`admin_audit where action = 'normalize_account'`)) === 3
       && (await count(`app_users where invited_by = $1`, [EMIL])) === 3
       && finalTotals.settings === 3, finalTotals);
 }

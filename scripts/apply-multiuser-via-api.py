@@ -66,7 +66,11 @@ def query(token: str, ref: str, sql: str):
     The token goes to curl through a config file on STDIN, never in argv, so
     it cannot be read out of `ps` by another process on this machine.
     """
-    url = f"https://api.supabase.com/v1/projects/{ref}/database/query"
+    # SUPABASE_MGMT_API_BASE exists for ONE reason: Bundle 44 points it at an
+    # in-process fake so the real backfill script runs its real SQL against a
+    # real (PGlite) database. Unset, it is the Management API.
+    base = os.environ.get("SUPABASE_MGMT_API_BASE", "https://api.supabase.com").rstrip("/")
+    url = f"{base}/v1/projects/{ref}/database/query"
     body = json.dumps({"query": sql})
 
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:

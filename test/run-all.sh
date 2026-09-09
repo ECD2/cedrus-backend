@@ -155,6 +155,19 @@ echo "=== Bundle 43 — programs data foundation (R6.2a): contract, RLS forced, 
 bun test/programs-foundation.test.mjs
 
 echo ""
+echo "=== Bundle 44 — backfill through the provisioning path (P1.3): one code path, the diff, idempotency, the script ==="
+# bun explicitly, not $RUNNER: top-level await + dynamic import, PGlite again.
+# Applies the FOUR migration files (foundation, provision_user, programs,
+# normalize_account) to a real Postgres and proves the P1.3 done-when as a
+# diff with controls: a backfilled account vs a fresh one EMPTY, alongside an
+# un-shaped row vs a fresh one NON-EMPTY, and two fresh ones EMPTY. It SPAWNS
+# the real backfill script (python3) against this database through an
+# in-process fake of the Management API endpoint: the dry run is proven to
+# send reads only; --commit is proven to produce the shape. A missing python3
+# is a battery FAILURE, not a skip (Lesson 7).
+bun test/normalize-account.test.mjs
+
+echo ""
 echo "=== CoS reader/schema conformance ==="
 # The ONLY stage that can catch a reader/schema mismatch. Every other suite
 # passes happily while one exists, because the reader, the composer and the

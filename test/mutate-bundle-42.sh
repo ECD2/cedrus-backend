@@ -29,7 +29,7 @@ MISSED=0
 # Every file this script mutates. The restore trap iterates this list, so a file
 # added to a mutate() call below must be added here too or an interrupted run
 # will leave it broken.
-MUTATED_FILES="src/services/provisioning.js supabase/migrations/20260909120000_provision_user.sql"
+MUTATED_FILES="src/services/provisioning.js supabase/migrations/20260909120000_provision_user.sql supabase/migrations/20260909210000_normalize_account.sql"
 
 # Checksum of every mutated file, so the restore is PROVEN rather than assumed.
 mksums() {
@@ -110,8 +110,15 @@ mutate "capabilities commit separately (rpc without them, then a second insert)"
   }" \
   "FAIL  fault at the capability step \(closed vocabulary\): no partial account survives"
 
+# GUARDS 2–6 mutate the P1.2 FILE (20260909120000). Since P1.3, that file's
+# provision_user is REDEFINED by 20260909210000_normalize_account.sql, so the
+# function the suite exercises is the later one. These five guards therefore
+# prove that the P1.2 file's OWN self-proof is still live (it still runs on
+# apply, and a corrupted file still refuses to commit), not that the live
+# function has the property. The live function's admin check, DEFINER,
+# search_path pin and grants are proven by test/mutate-bundle-44.sh.
 echo ""
-echo "-- guard 2: the actor must be an ACTIVE admin --"
+echo "-- guard 2: the actor must be an ACTIVE admin (P1.2 file's own control) --"
 # Caught by the MIGRATION's own CONTROL 3 before the suite's assertions run:
 # the migration refuses to apply a function that lets a member provision.
 mutate "the admin check is removed from the function" \
@@ -179,12 +186,15 @@ echo ""
 echo "-- guard 8: the closed vocabulary is the constraint's, not a copy in the function --"
 # Re-encoding the list in the function would let the two drift. The pin reads
 # the function body from pg_proc, not the file, so a comment cannot fool it.
-mutate "the function grows its own copy of the vocabulary" \
-  supabase/migrations/20260909120000_provision_user.sql \
-  "  insert into user_settings (user_id) values (v_user_id);" \
-  "  insert into user_settings (user_id) values (v_user_id);
-  if not (v_caps <@ array['run_agents','write_workspace','receive_brief','receive_sms']) then raise exception 'bad capability' using errcode = 'check_violation'; end if;" \
-  "FAIL  the function body contains no copy of the capability vocabulary"
+# Since P1.3 the LIVE body is the one in 20260909210000, so that is the file
+# mutated here; its own ASSERT 3 catches it first, and the suite's pin would
+# catch it if that assert were gone.
+mutate "the LIVE function grows its own copy of the vocabulary" \
+  supabase/migrations/20260909210000_normalize_account.sql \
+  "  v_shape := normalize_account(p_actor_user_id, v_user_id, v_caps);" \
+  "  if not (v_caps <@ array['run_agents','write_workspace','receive_brief','receive_sms']) then raise exception 'bad capability' using errcode = 'check_violation'; end if;
+  v_shape := normalize_account(p_actor_user_id, v_user_id, v_caps);" \
+  "ASSERT: a function body carries a copy of the capability vocabulary|FAIL  the function body contains no copy of the capability vocabulary"
 
 echo ""
 echo "=== RESULT: $PASSED guards proven live, $MISSED missed ==="
