@@ -63,7 +63,7 @@
 //   That is recorded in docs/SESSION_N3_2026-09-09.md and announced by this
 //   suite as NOT RE-VERIFIED, so a green run never implies it ran.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
@@ -88,11 +88,11 @@ const { logger } = await import('../src/utils/logger.js');
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, '..');
-const MIGRATIONS = [
-  '20260830120000_multiuser_foundation.sql',
-  '20260909120000_provision_user.sql',
-  '20260909180000_programs_foundation.sql',
-];
+// EVERY migration file in the directory, in version order — read from disk, not
+// listed here, so a migration that lands after this suite joins the proof on
+// its own: its tables are enumerated, read as anon, and asserted against the
+// catalog without anyone remembering to add them.
+const MIGRATIONS = readdirSync(join(REPO, 'supabase/migrations')).filter((f) => /^\d{14}_.*\.sql$/.test(f)).sort();
 const SQL = (f) => readFileSync(join(REPO, 'supabase/migrations', f), 'utf8');
 const FIXTURE = (f) => readFileSync(join(REPO, 'test/fixtures/programs', f), 'utf8');
 
@@ -215,15 +215,17 @@ create table cos.today_briefs (
 let applied = false; let applyError = null;
 try {
   await db.exec(FIXTURE_SQL);
-  await db.exec(SQL(MIGRATIONS[0]));
-  await db.exec(`update app_users set role = 'admin' where phone = '17860000001';`);
-  await db.exec(SQL(MIGRATIONS[1]));
-  await db.exec(SQL(MIGRATIONS[2]));
+  for (const f of MIGRATIONS) {
+    await db.exec(SQL(f));
+    // The bootstrap admin (II.5): one hand promotion, after the foundation and
+    // before provisioning exists — exactly as Bundles 42/43 stage it.
+    if (/multiuser_foundation/.test(f)) await db.exec(`update app_users set role = 'admin' where phone = '17860000001';`);
+  }
   applied = true;
 } catch (e) { applyError = { message: e.message, code: e.code, detail: e.detail }; }
 
 section('the migrations, with their own in-transaction self-proof, under Supabase-shaped default privileges');
-ok('foundation, provision_user and programs migrations all applied — every assertion and control inside them passed', applied, applyError);
+ok(`every migration file applied, in order (${MIGRATIONS.length}: ${MIGRATIONS.map((f) => f.replace(/^\d{14}_|\.sql$/g, '')).join(', ')}) — every assertion and control inside them passed`, applied, applyError);
 if (!applied) finish();
 
 const A = (await one(`select id from app_users where phone = '17860000001'`)).id;
